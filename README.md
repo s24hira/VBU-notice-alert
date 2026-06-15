@@ -41,7 +41,7 @@ JSONBIN_API_KEY=your_jsonbin_api_key_here
 JSONBIN_BIN_ID=your_jsonbin_bin_id_here
 
 # Optional Settings
-NEET_WEBSITE_URL=https://www.visvabharati.ac.in/home/all-notices/
+VBU_WEBSITE_URL=https://www.visvabharati.ac.in/home/all-notices/
 ```
 
 ---

@@ -98,7 +98,7 @@ class NoticeProcessor:
         for user_id in user_ids:
             try:
                 alert_message = f"""
-🚨New NEET Notice!🚨
+🚨New Visva-Bharati Notice!🚨
 Title: {notice['title']}
 PDF Link: {notice['link']}
                 """

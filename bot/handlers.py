@@ -1,5 +1,6 @@
 import telebot
 import logging
+import time
 from functools import wraps
 
 class BotHandlers:
@@ -22,7 +23,7 @@ class BotHandlers:
         @self.bot.message_handler(commands=['start'])
         @self.ensure_user
         def start_command(message):
-            start_msg = "Welcome! You'll now receive NEET notice alerts!"
+            start_msg = "Welcome! You'll now receive Visva-Bharati notice alerts!"
             self.bot.reply_to(message, start_msg)
 
         @self.bot.message_handler(commands=['status'])
@@ -34,13 +35,20 @@ class BotHandlers:
         @self.bot.message_handler(commands=['ping'])
         @self.ensure_user
         def ping_command(message):
-            self.bot.reply_to(message, "Pong!")
+            start_time = time.time()
+            sent_message = self.bot.reply_to(message, "Pong!")
+            latency = int((time.time() - start_time) * 1000)
+            self.bot.edit_message_text(
+                f"Pong! ({latency} ms)",
+                chat_id=sent_message.chat.id,
+                message_id=sent_message.message_id
+            )
 
         @self.bot.message_handler(commands=['help'])
         @self.ensure_user
         def help_command(message):
             help_text = """
-            NEET Notice Bot Commands:
+            Visva-Bharati Notice Bot Commands:
             /start - Begin receiving notice alerts
             /status - Check current bot status
             /ping - Ping the bot
