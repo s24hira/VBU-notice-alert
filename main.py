@@ -5,7 +5,6 @@ import telebot
 import schedule
 import time
 from dotenv import load_dotenv
-from flask import Flask, jsonify
 import threading
 
 # Import modular components
@@ -30,18 +29,18 @@ load_dotenv()
 # Configuration
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-NEET_WEBSITE_URL = os.getenv('NEET_WEBSITE_URL', 'https://neet.nta.nic.in/')
+VBU_WEBSITE_URL = os.getenv('VBU_WEBSITE_URL', 'https://www.visvabharati.ac.in/home/all-notices/')
 
 # Ensure data directory exists
 os.makedirs('data', exist_ok=True)
 os.makedirs('data/temp', exist_ok=True)
 
-class NEETNoticeBot:
+class VBUNoticeBot:
     def __init__(self):
         self.bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
         self.storage = JsonbinStorage()
         self.summarizer = GeminiPDFSummarizer(GEMINI_API_KEY)
-        self.notice_processor = NoticeProcessor(self.summarizer, self.storage, NEET_WEBSITE_URL)
+        self.notice_processor = NoticeProcessor(self.summarizer, self.storage, VBU_WEBSITE_URL)
         self.handlers = BotHandlers(self.bot, self.storage)
 
     def reset_webhook(self):
@@ -76,27 +75,6 @@ class NEETNoticeBot:
             polling_thread.daemon = True
             polling_thread.start()
             logger.info("Bot polling started in separate thread")
-
-            # Start a simple HTTP server for health checks in a separate thread
-            def run_health_check_server():
-                app = Flask(__name__)
-
-                @app.route('/health', methods=['GET'])
-                def health_check():
-                    return jsonify({'status': 'ok'}), 200
-
-                PORT = int(os.getenv('HEALTH_CHECK_PORT', 8001))
-                # Use a production-ready WSGI server like waitress or gunicorn
-                # For simplicity, we'll use Flask's built-in server here,
-                # but it's not recommended for production.
-                app.run(host='0.0.0.0', port=PORT)
-
-            health_check_thread = threading.Thread(target=run_health_check_server)
-            health_check_thread.daemon = True
-            health_check_thread.start()
-            logger.info("Health check server started in separate thread")
-
-
             logger.info("Starting main scheduler loop")
             while True:
                 schedule.run_pending()
@@ -107,7 +85,7 @@ class NEETNoticeBot:
             raise
 
 def main():
-    logger.info("Starting NEET Notice Bot application...")
+    logger.info("Starting Visva-Bharati Notice Bot application...")
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
         return
@@ -118,7 +96,7 @@ def main():
         logger.error("JSONBin API Key or Bin ID not set in environment variables.")
         return
         
-    bot = NEETNoticeBot()
+    bot = VBUNoticeBot()
     bot.run()
 
 if __name__ == '__main__':

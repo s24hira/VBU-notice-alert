@@ -18,7 +18,7 @@ class GeminiPDFSummarizer:
         """
         # Initialize Gemini Client
         self.client = genai.Client(api_key=api_key)
-        self.model = 'gemini-3.5-flash'
+        self.model = 'gemini-3-flash-preview'
 
     def summarize_pdf(self, pdf_path):
         """

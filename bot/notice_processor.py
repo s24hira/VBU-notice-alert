@@ -11,60 +11,46 @@ from bot.storage import JsonbinStorage
 logger = logging.getLogger(__name__)
 
 class NoticeProcessor:
-    def __init__(self, summarizer: GeminiPDFSummarizer, storage: JsonbinStorage, neet_website_url: str):
+    def __init__(self, summarizer: GeminiPDFSummarizer, storage: JsonbinStorage, website_url: str):
         self.summarizer = summarizer
         self.storage = storage
-        self.neet_website_url = neet_website_url
+        self.website_url = website_url
         os.makedirs('data/temp', exist_ok=True)
 
     def scrape_notices(self, max_retries=3):
         for attempt in range(max_retries):
             try:
-                response = requests.get(self.neet_website_url, timeout=30)
+                response = requests.get(self.website_url, timeout=30)
                 soup = BeautifulSoup(response.text, 'html.parser')
 
-                notices_container = soup.find('div', {'class': 'vc_tta-container'})
-                if not notices_container:
-                    logger.error("Could not find notices container.")
-                    continue
-                
-                active_panel = notices_container.find('div', {'class': 'vc_tta-panel vc_active'})
-                if not active_panel:
-                    logger.error("Could not find active notices panel.")
-                    continue
-                
-                notices_list_container = active_panel.find('div', {'class': 'gen-list'})
-                if not notices_list_container:
-                    logger.error("Could not find notices list container.")
-                    continue
-
-                notices_list = notices_list_container.find('ul')
-                if not notices_list:
-                    logger.error("Could not find notices list.")
+                notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
+                if not notice_boxes:
+                    logger.error("Could not find any an-noticebox divs.")
                     continue
 
                 new_notices = []
                 existing_notice_urls = self.storage.get_all_notice_urls()
                 logger.info(f"Fetched {len(existing_notice_urls)} existing notice URLs.")
 
-                for li in notices_list.find_all('li'):
-                    anchor = li.find('a')
+                for box in notice_boxes[:20]:
+                    notice_text_div = box.find('div', {'class': 'NoticeText'})
+                    if not notice_text_div:
+                        continue
+                    anchor = notice_text_div.find('a')
+                    if not anchor:
+                        continue
+                        
                     notice_title = anchor.text.strip()
-                    notice_link = anchor['href']
-
-                    date_element = li.find('span', {'class': lambda x: x and 'date' in x.lower()})
-                    if date_element:
-                        date_string = date_element.text.strip()
+                    notice_link = anchor['href'].strip()
+                    
+                    date_div = box.find('div', {'class': 'noticeDate'})
+                    notice_date = None
+                    if date_div:
+                        date_string = ' '.join(date_div.text.split())
                         try:
-                            notice_date = datetime.datetime.strptime(date_string, '%d-%m-%Y')
+                            notice_date = datetime.datetime.strptime(date_string, '%b %d %Y')
                         except ValueError:
-                            try:
-                                notice_date = datetime.datetime.strptime(date_string, '%Y-%m-%d')
-                            except ValueError:
-                                logger.error(f"Could not parse date: {date_string}")
-                                notice_date = None
-                    else:
-                        notice_date = None
+                            logger.error(f"Could not parse date: {date_string}")
 
                     if notice_link not in existing_notice_urls:
                         new_notices.append({
@@ -73,7 +59,6 @@ class NoticeProcessor:
                             'date': notice_date
                         })
 
-                new_notices = sorted(new_notices, key=lambda x: x['date'] if x['date'] else datetime.datetime.min, reverse=True)
                 return new_notices
 
             except Exception as e:

@@ -40,16 +40,16 @@ def test_jsonbin_storage():
         logger.error(f"FAILURE: JSONBin Storage check failed: {e}")
         return None
 
-def test_scraping_and_summarizer(storage, gemini_key, neet_url):
+def test_scraping_and_summarizer(storage, gemini_key, vbu_url):
     logger.info("--- Testing Scraping and Gemini Summarizer ---")
     if not gemini_key:
         logger.error("FAILURE: GEMINI_API_KEY environment variable not set.")
         return
     try:
         summarizer = GeminiPDFSummarizer(gemini_key)
-        processor = NoticeProcessor(summarizer, storage, neet_url)
+        processor = NoticeProcessor(summarizer, storage, vbu_url)
         
-        logger.info(f"Scraping notices from: {neet_url} ...")
+        logger.info(f"Scraping notices from: {vbu_url} ...")
         notices = processor.scrape_notices()
         logger.info(f"SUCCESS: Scraped {len(notices)} new notices.")
         for idx, notice in enumerate(notices[:3]):
@@ -83,13 +83,13 @@ def main():
     
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     gemini_key = os.getenv('GEMINI_API_KEY')
-    neet_url = os.getenv('NEET_WEBSITE_URL', 'https://neet.nta.nic.in/')
+    vbu_url = os.getenv('VBU_WEBSITE_URL', 'https://www.visvabharati.ac.in/home/all-notices/')
     
     bot = test_telegram_bot(token)
     storage = test_jsonbin_storage()
     
     if storage:
-        test_scraping_and_summarizer(storage, gemini_key, neet_url)
+        test_scraping_and_summarizer(storage, gemini_key, vbu_url)
 
 if __name__ == '__main__':
     main()

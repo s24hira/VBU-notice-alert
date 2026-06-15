@@ -1,16 +1,15 @@
-# NEET Notice Alert Bot 🚀
+# Visva-Bharati Notice Alert Bot 🚀
 
-A modern, lightweight Telegram bot designed to monitor the official NEET website for new notices, extract and summarize PDF contents using Google's **Gemini 3.5 Flash** model, and send instant alerts to subscribed users.
+A modern, lightweight Telegram bot designed to monitor the official Visva-Bharati University website for new notices, extract and summarize PDF contents using Google's **Gemini 3.5 Flash** model, and send instant alerts to subscribed users. It specifically tracks the 20 most recent notices.
 
 ---
 
 ## 🌟 Key Features
 
-- **Automated Monitoring:** Continuously scans the NEET website for new notices at randomized, natural intervals (5–8 minutes).
+- **Automated Monitoring:** Continuously scans the Visva-Bharati website for new notices at randomized, natural intervals (5–8 minutes).
 - **Direct PDF Summarization:** Uses Google's modern **Gemini 2.0/3.5 GenAI Client** to summarize PDFs inline without slow, bulky PDF-to-image conversions.
 - **Instant Alerts:** Dispatches notice titles, direct links, and clear bullet-point summaries to all subscribed Telegram users.
 - **Lightweight Storage:** Migrated to **JSONBin.io** for serverless, configuration-free storage of notices and subscriber lists.
-- **Microservice Ready:** Integrates a built-in health-check server (`/health` endpoint on port `8001`) for zero-downtime hosting.
 - **Interactive Verification**: Includes an end-to-end `test_alert.py` testing script to instantly verify the scraper, Gemini API, and Telegram alerts.
 
 ---
@@ -42,8 +41,7 @@ JSONBIN_API_KEY=your_jsonbin_api_key_here
 JSONBIN_BIN_ID=your_jsonbin_bin_id_here
 
 # Optional Settings
-NEET_WEBSITE_URL=https://neet.nta.nic.in/
-HEALTH_CHECK_PORT=8001
+NEET_WEBSITE_URL=https://www.visvabharati.ac.in/home/all-notices/
 ```
 
 ---
@@ -86,7 +84,7 @@ HEALTH_CHECK_PORT=8001
 
 Interact with the bot on Telegram using:
 
-- `/start` - Subscribe to receive alerts for new NEET notices.
+- `/start` - Subscribe to receive alerts for new Visva-Bharati notices.
 - `/status` - Check if you are currently subscribed.
 - `/ping` - Confirm bot is online (responds with `Pong!`).
 - `/help` - View a list of all available commands.
