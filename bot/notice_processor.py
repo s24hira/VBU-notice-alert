@@ -97,9 +97,14 @@ class NoticeProcessor:
     def send_telegram_alerts(self, bot, notice, summary, user_ids):
         for user_id in user_ids:
             try:
+                date_str = notice['date'].strftime('%b %d, %Y') if isinstance(notice.get('date'), datetime.date) else "N/A"
                 alert_message = f"""
 🚨New Visva-Bharati Notice!🚨
+
 Title: {notice['title']}
+
+Date: {date_str}
+
 PDF Link: {notice['link']}
                 """
                 bot.send_message(user_id, alert_message)
@@ -107,6 +112,7 @@ PDF Link: {notice['link']}
                 if summary:
                     summary_message = f"""
 📋 Notice Summary:
+
 {summary}
                     """
                     bot.send_message(user_id, summary_message)
