@@ -20,12 +20,12 @@ class GeminiPDFSummarizer:
         self.client = genai.Client(api_key=api_key)
         self.model = 'gemini-3-flash-preview'
 
-    def summarize_pdf(self, pdf_path):
+    def summarize_pdf(self, pdf_bytes):
         """
-        Summarize a PDF using Gemini API
+        Summarize a PDF using Gemini API from in-memory bytes.
 
         Args:
-            pdf_path (str): Path to the PDF file
+            pdf_bytes (bytes): The raw bytes of the PDF document
 
         Returns:
             str: Summary of the PDF
@@ -42,11 +42,7 @@ class GeminiPDFSummarizer:
             """
 
             try:
-                logging.info(f"Reading PDF {pdf_path} for inline Gemini summarization...")
-                with open(pdf_path, "rb") as f:
-                    pdf_bytes = f.read()
-
-                logging.info("Generating summary from inline PDF content...")
+                logging.info("Generating summary from in-memory PDF content...")
                 response = self.client.models.generate_content(
                     model=self.model,
                     contents=[

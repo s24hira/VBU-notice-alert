@@ -59,7 +59,7 @@ class VBUNoticeBot:
             except Exception as e:
                 logger.error(f"Error in scheduled job: {e}")
             
-            next_interval = random.randint(300, 480)  # 5-8 minutes
+            next_interval = random.randint(1800, 2400)  # 30-40 minutes
             schedule.clear('notice_check')
             schedule.every(next_interval).seconds.do(scheduled_job).tag('notice_check')
             logger.info(f"Next check scheduled in {next_interval} seconds")

@@ -15,13 +15,13 @@ class NoticeProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
-        os.makedirs('data/temp', exist_ok=True)
+        self.session = requests.Session()
 
     def scrape_notices(self, max_retries=3):
         for attempt in range(max_retries):
             try:
-                response = requests.get(self.website_url, timeout=30)
-                soup = BeautifulSoup(response.text, 'html.parser')
+                response = self.session.get(self.website_url, timeout=30)
+                soup = BeautifulSoup(response.content, 'html.parser')
 
                 notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
                 if not notice_boxes:
@@ -68,24 +68,19 @@ class NoticeProcessor:
                 
         return []
 
-    def download_pdf(self, pdf_url, max_retries=3):
+    def download_pdf_bytes(self, pdf_url, max_retries=3):
         for attempt in range(max_retries):
             try:
-                response = requests.get(pdf_url, timeout=30)
+                response = self.session.get(pdf_url, timeout=30)
                 if not response.headers.get('content-type', '').startswith('application/pdf'):
                     logger.error("Downloaded file is not a PDF")
                     return None
 
-                pdf_path = os.path.join('data/temp', 'current_notice.pdf')
-                with open(pdf_path, 'wb') as f:
-                    f.write(response.content)
-
-                if os.path.getsize(pdf_path) < 100:
+                if len(response.content) < 100:
                     logger.error("Downloaded PDF file is too small")
-                    os.remove(pdf_path)
                     return None
 
-                return pdf_path
+                return response.content
 
             except Exception as e:
                 logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {e}")
@@ -133,13 +128,13 @@ PDF Link: {notice['link']}
                 summary = None  # Initialize summary to None
                 try:
                     logger.info(f"Processing notice: {notice['title']}")
-                    pdf_path = self.download_pdf(notice['link'])
-                    if not pdf_path:
+                    pdf_bytes = self.download_pdf_bytes(notice['link'])
+                    if not pdf_bytes:
                         continue
 
                     logger.info("Generating summary using Gemini")
                     try:
-                        summary = self.summarizer.summarize_pdf(pdf_path)
+                        summary = self.summarizer.summarize_pdf(pdf_bytes)
                     except SummarizationError as e:
                         logger.error(f"Summarization failed: {e}")
                         summary = "Could not generate a summary for this notice. Please check the PDF directly."
@@ -160,11 +155,6 @@ PDF Link: {notice['link']}
                         logger.info("Notice processed successfully")
                     else:
                         logger.warning(f"Notice '{notice['title']}' was not added to Supabase, skipping alerts.")
-
-                    try:
-                        os.remove(pdf_path)
-                    except Exception as e:
-                        logger.error(f"Error removing temporary PDF: {e}")
 
                 except Exception as e:
                     logger.error(f"Notice processing error: {e}")

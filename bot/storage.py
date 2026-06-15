@@ -23,6 +23,9 @@ class JsonbinStorage:
             'Content-Type': 'application/json'
         }
 
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+
         # Initialize the cache
         self.cache = None
         self.cache_time = None
@@ -37,7 +40,7 @@ class JsonbinStorage:
 
         try:
             url = f"{self.base_url}/{self.bin_id}/latest"
-            response = requests.get(url, headers=self.headers)
+            response = self.session.get(url)
             if response.status_code == 200:
                 data = response.json().get('record', {})
                 # Ensure structure exists
@@ -59,7 +62,7 @@ class JsonbinStorage:
     def _save_data(self, data):
         try:
             url = f"{self.base_url}/{self.bin_id}"
-            response = requests.put(url, headers=self.headers, json=data)
+            response = self.session.put(url, json=data)
             if response.status_code == 200:
                 self.cache = data
                 self.cache_time = datetime.now()
