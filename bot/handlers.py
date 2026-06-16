@@ -88,10 +88,34 @@ class BotHandlers:
         return markup
 
     def setup_commands(self):
-        @self.bot.message_handler(commands=['start', 'settings'])
+        @self.bot.message_handler(commands=['start'])
         @self.ensure_user
         def start_command(message):
-            msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease configure your subscription by selecting your **Academic Level**:"
+            chat_id = message.chat.id
+            sub = self.storage.get_subscriber(chat_id)
+            if sub and sub.get('academic_level') and sub.get('bhavana') and sub.get('department'):
+                msg_text = (
+                    f"👋 You are already subscribed to notice alerts!\n\n"
+                    f"**Current Configuration:**\n"
+                    f"🎓 **Academic Level:** {sub['academic_level']}\n"
+                    f"🏛️ **Institute (Bhavana):** {sub['bhavana']}\n"
+                    f"📚 **Department:** {sub['department']}\n\n"
+                    f"If you wish to change your configuration, please use /settings."
+                )
+                self.bot.send_message(chat_id, msg_text, parse_mode="Markdown")
+            else:
+                msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease configure your subscription by selecting your **Academic Level**:"
+                self.bot.send_message(
+                    chat_id, 
+                    msg_text, 
+                    reply_markup=self._build_level_keyboard(),
+                    parse_mode="Markdown"
+                )
+
+        @self.bot.message_handler(commands=['settings'])
+        @self.ensure_user
+        def settings_command(message):
+            msg_text = "🔧 **Subscription Settings**\n\nPlease reconfigure your subscription by selecting your **Academic Level**:"
             self.bot.send_message(
                 message.chat.id, 
                 msg_text, 

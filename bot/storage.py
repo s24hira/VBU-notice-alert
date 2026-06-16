@@ -52,6 +52,16 @@ class SupabaseStorage:
             logger.error(f"Error upserting subscriber {chat_id}: {e}")
             return False
 
+    def get_subscriber(self, chat_id):
+        try:
+            response = self.supabase.table('subscribers').select('*').eq('telegram_chat_id', chat_id).execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching subscriber {chat_id}: {e}")
+            return None
+
     def get_all_users(self):
         # Returns all users (fallback)
         try:
