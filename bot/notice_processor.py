@@ -5,13 +5,13 @@ import datetime
 from bs4 import BeautifulSoup
 import time
 
-from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError
-from bot.storage import JsonbinStorage
+from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError, NoticeExtraction
+from bot.storage import SupabaseStorage
 
 logger = logging.getLogger(__name__)
 
 class NoticeProcessor:
-    def __init__(self, summarizer: GeminiPDFSummarizer, storage: JsonbinStorage, website_url: str):
+    def __init__(self, summarizer: GeminiPDFSummarizer, storage: SupabaseStorage, website_url: str):
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
@@ -32,7 +32,7 @@ class NoticeProcessor:
                 existing_notice_urls = self.storage.get_all_notice_urls()
                 logger.info(f"Fetched {len(existing_notice_urls)} existing notice URLs.")
 
-                for box in notice_boxes[:20]:
+                for box in notice_boxes[:10]:
                     notice_text_div = box.find('div', {'class': 'NoticeText'})
                     if not notice_text_div:
                         continue
@@ -89,7 +89,7 @@ class NoticeProcessor:
 
         return None
 
-    def send_telegram_alerts(self, bot, notice, summary, user_ids):
+    def send_telegram_alerts(self, bot, notice, summary_text, user_ids):
         for user_id in user_ids:
             try:
                 date_str = notice['date'].strftime('%b %d, %Y') if isinstance(notice.get('date'), datetime.date) else "N/A"
@@ -104,11 +104,11 @@ PDF Link: {notice['link']}
                 """
                 bot.send_message(user_id, alert_message)
 
-                if summary:
+                if summary_text:
                     summary_message = f"""
 📋 Notice Summary:
 
-{summary}
+{summary_text}
                     """
                     bot.send_message(user_id, summary_message)
 
@@ -121,11 +121,8 @@ PDF Link: {notice['link']}
             new_notices = self.scrape_notices()
             logger.info(f"Found {len(new_notices)} new notices")
 
-            all_users = self.storage.get_all_users()
-            logger.info(f"Fetched {len(all_users)} users.")
-
             for notice in new_notices:
-                summary = None  # Initialize summary to None
+                extraction: NoticeExtraction = None
                 try:
                     logger.info(f"Processing notice: {notice['title']}")
                     pdf_bytes = self.download_pdf_bytes(notice['link'])
@@ -134,22 +131,34 @@ PDF Link: {notice['link']}
 
                     logger.info("Generating summary using Gemini")
                     try:
-                        summary = self.summarizer.summarize_pdf(pdf_bytes)
+                        extraction = self.summarizer.summarize_pdf(pdf_bytes)
                     except SummarizationError as e:
                         logger.error(f"Summarization failed: {e}")
-                        summary = "Could not generate a summary for this notice. Please check the PDF directly."
+                    
+                    # Sleep to respect the Gemini API free tier rate limit (15 requests per minute)
+                    time.sleep(5)
 
-                    added_record = self.storage.add_notice({
+                    # Build notice_data for storage and finding users
+                    notice_data = {
                         'title': notice['title'],
                         'link': notice['link'],
                         'date': notice['date'],
-                        'summary': summary if summary else "Summary not available.",
+                        'summary': extraction.summary if extraction else "Summary not available.",
+                        'target_levels': extraction.target_levels if extraction else [],
+                        'target_bhavana': extraction.target_bhavana if extraction else None,
+                        'target_department': extraction.target_department if extraction else None,
+                        'is_general': extraction.is_general if extraction else True,
                         'status': 'New'
-                    })
+                    }
+
+                    added_record = self.storage.add_notice(notice_data)
 
                     if added_record:
-                        logger.info("Sending alerts to users")
-                        self.send_telegram_alerts(bot, notice, summary, all_users)
+                        logger.info("Finding matching subscribers...")
+                        matching_users = self.storage.get_matching_subscribers(notice_data)
+                        logger.info(f"Sending alerts to {len(matching_users)} matched users")
+                        
+                        self.send_telegram_alerts(bot, notice, notice_data['summary'], matching_users)
                         # Update status to 'Sent' after successfully sending alerts
                         self.storage.update_notice_status(added_record['id'], 'Sent')
                         logger.info("Notice processed successfully")

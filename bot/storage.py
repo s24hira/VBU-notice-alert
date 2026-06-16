@@ -1,172 +1,147 @@
 import os
 import logging
-import requests
-import uuid
+from datetime import datetime, timezone
 from dotenv import load_dotenv
-from datetime import datetime, timedelta, timezone
+from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-class JsonbinStorage:
+class SupabaseStorage:
     def __init__(self):
-        self.api_key = os.getenv('JSONBIN_API_KEY')
-        self.bin_id = os.getenv('JSONBIN_BIN_ID')
-        self.base_url = "https://api.jsonbin.io/v3/b"
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.supabase_key = os.getenv("SUPABASE_KEY")
 
-        if not all([self.api_key, self.bin_id]):
-            logger.error("JSONBIN_API_KEY or JSONBIN_BIN_ID not set in environment variables.")
-            raise ValueError("JSONBin credentials missing.")
+        if not all([self.supabase_url, self.supabase_key]):
+            logger.error("SUPABASE_URL or SUPABASE_KEY not set in environment variables.")
+            raise ValueError("Supabase credentials missing.")
 
-        self.headers = {
-            'X-Master-Key': self.api_key,
-            'Content-Type': 'application/json'
-        }
-
-        self.session = requests.Session()
-        self.session.headers.update(self.headers)
-
-        # Initialize the cache
-        self.cache = None
-        self.cache_time = None
-        self.cache_ttl = timedelta(minutes=5)
-        
-        # Initial fetch to verify connection
-        self._fetch_data()
-
-    def _fetch_data(self):
-        if self.cache is not None and (datetime.now() - self.cache_time < self.cache_ttl):
-            return self.cache
-
-        try:
-            url = f"{self.base_url}/{self.bin_id}/latest"
-            response = self.session.get(url)
-            if response.status_code == 200:
-                data = response.json().get('record', {})
-                # Ensure structure exists
-                if 'users' not in data:
-                    data['users'] = []
-                if 'notices' not in data:
-                    data['notices'] = []
-                
-                self.cache = data
-                self.cache_time = datetime.now()
-                return self.cache
-            else:
-                logger.error(f"Error fetching data from JSONBin: {response.status_code} - {response.text}")
-                return {'users': [], 'notices': []}
-        except Exception as e:
-            logger.error(f"Exception fetching data from JSONBin: {e}")
-            return {'users': [], 'notices': []}
-
-    def _save_data(self, data):
-        try:
-            url = f"{self.base_url}/{self.bin_id}"
-            response = self.session.put(url, json=data)
-            if response.status_code == 200:
-                self.cache = data
-                self.cache_time = datetime.now()
-                return True
-            else:
-                logger.error(f"Error saving data to JSONBin: {response.status_code} - {response.text}")
-                return False
-        except Exception as e:
-            logger.error(f"Exception saving data to JSONBin: {e}")
-            return False
+        self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
 
     # User management
     def add_user(self, chat_id, username=None):
-        if not self.user_exists(chat_id):
-            data = self._fetch_data()
-            joined_date = datetime.now(timezone.utc).isoformat()
-            user_data = {
-                'chat_id': chat_id,
-                'joined_date': joined_date
-            }
-            if username:
-                user_data['username'] = username
-            
-            data['users'].append(user_data)
-            if self._save_data(data):
-                logger.info(f"User {chat_id} added to JSONBin.")
+        # We might not know their selections yet, but we can insert them with defaults or leave them null.
+        # However, the categorisation logic requires them to complete the flow.
+        # This add_user is kept for basic backwards compatibility with ping/status if needed,
+        # but realistically they need to do /start fully.
+        try:
+            # Check if user exists
+            response = self.supabase.table('subscribers').select('*').eq('telegram_chat_id', chat_id).execute()
+            if not response.data:
+                self.supabase.table('subscribers').insert({
+                    'telegram_chat_id': chat_id
+                }).execute()
+                logger.info(f"User {chat_id} added to Supabase.")
                 return True
-            else:
-                logger.error(f"Failed to add user {chat_id} to JSONBin.")
-                return False
-        logger.info(f"User {chat_id} already exists. Not adding.")
-        return False
+            return False
+        except Exception as e:
+            logger.error(f"Error adding user {chat_id} to Supabase: {e}")
+            return False
 
-    def user_exists(self, chat_id):
-        data = self._fetch_data()
-        for user in data.get('users', []):
-            if user.get('chat_id') == chat_id:
-                return True
-        return False
+    def upsert_subscriber(self, chat_id, level, bhavana, department):
+        try:
+            self.supabase.table('subscribers').upsert({
+                'telegram_chat_id': chat_id,
+                'academic_level': level,
+                'bhavana': bhavana,
+                'department': department
+            }).execute()
+            logger.info(f"Subscriber {chat_id} upserted with selections: {level}, {bhavana}, {department}.")
+            return True
+        except Exception as e:
+            logger.error(f"Error upserting subscriber {chat_id}: {e}")
+            return False
 
     def get_all_users(self):
-        data = self._fetch_data()
-        return [user.get('chat_id') for user in data.get('users', []) if 'chat_id' in user]
+        # Returns all users (fallback)
+        try:
+            response = self.supabase.table('subscribers').select('telegram_chat_id').execute()
+            return [user['telegram_chat_id'] for user in response.data]
+        except Exception as e:
+            logger.error(f"Error getting all users: {e}")
+            return []
+
+    def get_matching_subscribers(self, notice_data):
+        # notice_data should contain target_levels, target_bhavana, target_department, is_general
+        try:
+            if notice_data.get('is_general', False):
+                return self.get_all_users()
+
+            target_levels = notice_data.get('target_levels') or []
+            target_bhavana = notice_data.get('target_bhavana')
+            target_department = notice_data.get('target_department')
+
+            query = self.supabase.table('subscribers').select('telegram_chat_id')
+
+            # We need to construct the matching logic. 
+            # If target_levels is provided, match if user's academic_level is in target_levels.
+            if target_levels:
+                query = query.in_('academic_level', target_levels)
+            
+            if target_bhavana:
+                query = query.eq('bhavana', target_bhavana)
+            
+            if target_department:
+                query = query.in_('department', [target_department, 'All'])
+
+            response = query.execute()
+            return [user['telegram_chat_id'] for user in response.data]
+        except Exception as e:
+            logger.error(f"Error fetching matching subscribers: {e}")
+            return self.get_all_users() # Fallback to all if filtering fails
 
     # Notice management
     def add_notice(self, notice_data):
-        data = self._fetch_data()
-        
-        # Check if notice already exists by title or link
-        for notice in data.get('notices', []):
-            if notice.get('title') == notice_data.get('title') or notice.get('link') == notice_data.get('link'):
-                logger.info(f"Notice '{notice_data.get('title')}' already exists in JSONBin. Skipping.")
+        try:
+            # Check if notice already exists
+            response = self.supabase.table('notices').select('id').or_(
+                f"title.eq.\"{notice_data.get('title')}\",link.eq.\"{notice_data.get('link')}\""
+            ).execute()
+            
+            if response.data:
+                logger.info(f"Notice '{notice_data.get('title')}' already exists. Skipping.")
                 return None
 
-        # Ensure date is in ISO format if present
-        if 'date' in notice_data and isinstance(notice_data['date'], datetime):
-            notice_data['date'] = notice_data['date'].isoformat()
-        elif 'date' in notice_data and not isinstance(notice_data['date'], str):
-            notice_data['date'] = None
+            date_val = notice_data.get('date')
+            if isinstance(date_val, datetime):
+                date_val = date_val.isoformat()
 
-        new_notice = {
-            'id': str(uuid.uuid4()),
-            'title': notice_data.get('title'),
-            'link': notice_data.get('link'),
-            'date': notice_data.get('date'),
-            'summary': notice_data.get('summary', ''),
-            'status': notice_data.get('status', 'New')
-        }
-        
-        data['notices'].append(new_notice)
-        if self._save_data(data):
-            logger.info(f"Notice '{notice_data.get('title')}' added to JSONBin.")
-            return new_notice
-        else:
-            logger.error(f"Failed to add notice '{notice_data.get('title')}' to JSONBin.")
+            new_notice = {
+                'title': notice_data.get('title'),
+                'link': notice_data.get('link'),
+                'target_levels': notice_data.get('target_levels', []),
+                'target_bhavana': notice_data.get('target_bhavana'),
+                'target_department': notice_data.get('target_department'),
+                'is_general': notice_data.get('is_general', False),
+                'date': date_val,
+                'summary': notice_data.get('summary', ''),
+                'status': notice_data.get('status', 'New')
+            }
+            
+            res = self.supabase.table('notices').insert(new_notice).execute()
+            if res.data:
+                logger.info(f"Notice '{notice_data.get('title')}' added to Supabase.")
+                return res.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Failed to add notice '{notice_data.get('title')}': {e}")
             return None
 
-    def notice_exists(self, title, link):
-        data = self._fetch_data()
-        for notice in data.get('notices', []):
-            if notice.get('status') == 'Sent' and (notice.get('title') == title or notice.get('link') == link):
-                return True
-        return False
-
     def get_all_notice_urls(self):
-        data = self._fetch_data()
-        return {notice.get('link') for notice in data.get('notices', []) if 'link' in notice}
+        try:
+            response = self.supabase.table('notices').select('link').execute()
+            return {notice['link'] for notice in response.data}
+        except Exception as e:
+            logger.error(f"Error fetching notice URLs: {e}")
+            return set()
 
     def update_notice_status(self, record_id, status):
-        data = self._fetch_data()
-        updated = False
-        for notice in data.get('notices', []):
-            if notice.get('id') == record_id:
-                notice['status'] = status
-                updated = True
-                break
-        
-        if updated:
-            if self._save_data(data):
+        try:
+            res = self.supabase.table('notices').update({'status': status}).eq('id', record_id).execute()
+            if res.data:
                 logger.info(f"Notice {record_id} status updated to {status}.")
                 return True
-            else:
-                logger.error(f"Failed to update notice {record_id} status in JSONBin.")
-                return False
-        else:
-            logger.error(f"Notice {record_id} not found in JSONBin for status update.")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to update notice {record_id} status: {e}")
             return False

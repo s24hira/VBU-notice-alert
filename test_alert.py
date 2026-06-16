@@ -4,7 +4,7 @@ import requests
 from dotenv import load_dotenv
 import telebot
 
-from bot.storage import JsonbinStorage
+from bot.storage import SupabaseStorage
 from bot.notice_processor import NoticeProcessor
 from bot.utils.summarizer import GeminiPDFSummarizer
 
@@ -29,15 +29,16 @@ def test_telegram_bot(token):
         logger.error(f"FAILURE: Telegram Bot verification failed: {e}")
         return None
 
-def test_jsonbin_storage():
-    logger.info("--- Testing JSONBin Storage ---")
+def test_supabase_storage():
+    logger.info("--- Testing Supabase Storage ---")
     try:
-        storage = JsonbinStorage()
-        data = storage._fetch_data()
-        logger.info(f"SUCCESS: Successfully fetched from JSONBin. Users count: {len(data.get('users', []))}, Notices count: {len(data.get('notices', []))}")
+        storage = SupabaseStorage()
+        urls = storage.get_all_notice_urls()
+        users = storage.get_all_users()
+        logger.info(f"SUCCESS: Successfully fetched from Supabase. Users count: {len(users)}, Notices count: {len(urls)}")
         return storage
     except Exception as e:
-        logger.error(f"FAILURE: JSONBin Storage check failed: {e}")
+        logger.error(f"FAILURE: Supabase Storage check failed: {e}")
         return None
 
 def test_scraping_and_summarizer(storage, gemini_key, vbu_url):
@@ -60,19 +61,16 @@ def test_scraping_and_summarizer(storage, gemini_key, vbu_url):
         # Test PDF download and summarization using a standard sample PDF
         test_pdf_url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
         logger.info(f"Downloading test PDF from: {test_pdf_url} ...")
-        pdf_path = processor.download_pdf(test_pdf_url)
-        if pdf_path:
-            logger.info(f"SUCCESS: PDF downloaded to: {pdf_path}")
+        pdf_bytes = processor.download_pdf_bytes(test_pdf_url)
+        if pdf_bytes:
+            logger.info(f"SUCCESS: PDF downloaded in memory ({len(pdf_bytes)} bytes)")
             logger.info("Summarizing test PDF with Gemini...")
-            summary = summarizer.summarize_pdf(pdf_path)
-            logger.info(f"SUCCESS: Summary generated:\n{summary}")
-            
-            try:
-                if os.path.exists(pdf_path):
-                    os.remove(pdf_path)
-                    logger.info("Cleaned up temporary test PDF.")
-            except Exception as ex:
-                logger.warning(f"Failed to remove test PDF file: {ex}")
+            extraction = summarizer.summarize_pdf(pdf_bytes)
+            logger.info(f"SUCCESS: Summary generated:\n{extraction.summary}")
+            logger.info(f"  Levels: {extraction.target_levels}")
+            logger.info(f"  Institute: {extraction.target_bhavana}")
+            logger.info(f"  Dept: {extraction.target_department}")
+            logger.info(f"  General: {extraction.is_general}")
         else:
             logger.error("FAILURE: PDF download failed.")
     except Exception as e:
@@ -86,7 +84,7 @@ def main():
     vbu_url = os.getenv('VBU_WEBSITE_URL', 'https://www.visvabharati.ac.in/home/all-notices/')
     
     bot = test_telegram_bot(token)
-    storage = test_jsonbin_storage()
+    storage = test_supabase_storage()
     
     if storage:
         test_scraping_and_summarizer(storage, gemini_key, vbu_url)

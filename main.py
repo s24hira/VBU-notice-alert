@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import threading
 
 # Import modular components
-from bot.storage import JsonbinStorage
+from bot.storage import SupabaseStorage
 from bot.handlers import BotHandlers
 from bot.notice_processor import NoticeProcessor
 from bot.utils.summarizer import GeminiPDFSummarizer
@@ -38,7 +38,7 @@ os.makedirs('data/temp', exist_ok=True)
 class VBUNoticeBot:
     def __init__(self):
         self.bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-        self.storage = JsonbinStorage()
+        self.storage = SupabaseStorage()
         self.summarizer = GeminiPDFSummarizer(GEMINI_API_KEY)
         self.notice_processor = NoticeProcessor(self.summarizer, self.storage, VBU_WEBSITE_URL)
         self.handlers = BotHandlers(self.bot, self.storage)
@@ -92,8 +92,8 @@ def main():
     if not GEMINI_API_KEY:
         logger.error("GEMINI_API_KEY environment variable not set")
         return
-    if not os.getenv('JSONBIN_API_KEY') or not os.getenv('JSONBIN_BIN_ID'):
-        logger.error("JSONBin API Key or Bin ID not set in environment variables.")
+    if not os.getenv('SUPABASE_URL') or not os.getenv('SUPABASE_KEY'):
+        logger.error("SUPABASE_URL or SUPABASE_KEY not set in environment variables.")
         return
         
     bot = VBUNoticeBot()
