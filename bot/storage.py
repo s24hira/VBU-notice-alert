@@ -38,14 +38,18 @@ class SupabaseStorage:
             logger.error(f"Error adding user {chat_id} to Supabase: {e}")
             return False
 
-    def upsert_subscriber(self, chat_id, bhavana, department):
+    def upsert_subscriber(self, chat_id, bhavana, department, name=None):
         try:
-            self.supabase.table('subscribers').upsert({
+            payload = {
                 'telegram_chat_id': chat_id,
                 'bhavana': bhavana,
                 'department': department
-            }).execute()
-            logger.info(f"Subscriber {chat_id} upserted with selections: {bhavana}, {department}.")
+            }
+            if name:
+                payload['name'] = name
+                
+            self.supabase.table('subscribers').upsert(payload).execute()
+            logger.info(f"Subscriber {chat_id} upserted with selections: {bhavana}, {department}, name: {name}.")
             return True
         except Exception as e:
             logger.error(f"Error upserting subscriber {chat_id}: {e}")

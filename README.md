@@ -87,7 +87,7 @@ VBU_WEBSITE_URL=https://www.visvabharati.ac.in/home/all-notices/
 
 Interact with the bot on Telegram using:
 
-- `/start` - Setup notice alerts via the 2-step UI configuration (Institute -> Department).
+- `/start` - Setup notice alerts via the UI configuration (Institute -> Department -> Name).
 - `/settings` - Reconfigure your subscription perfectly matching your needs.
 - `/status` - Check current bot status.
 - `/ping` - Confirm bot is online (responds with `Pong!`).

@@ -99,8 +99,10 @@ class GeminiPDFSummarizer:
         Extract the following information:
         1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
         2. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
+           - IMPORTANT: If a notice is issued by the central office but involves actions/interests specific to a particular Institute/Department's students, set target_bhavana to that specific Institute, NOT the Central Office.
         3. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
         4. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular institutes/departments.
+           - IMPORTANT: If a notice is issued by the central office but involves actions/interests for ALL university students, MUST set is_general to true.
         """
 
         for attempt in range(max_retries):

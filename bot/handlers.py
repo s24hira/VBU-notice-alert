@@ -1,5 +1,5 @@
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 import logging
 import time
 from functools import wraps
@@ -76,36 +76,85 @@ class BotHandlers:
         markup.add(InlineKeyboardButton("🔙 Back to Institutes", callback_data="START"))
         return markup
 
+    def _save_name_first_handler(self, message):
+        chat_id = message.chat.id
+        name = message.text.strip() if message.text else ""
+        
+        if not name:
+            msg = self.bot.send_message(chat_id, "❌ Name cannot be empty. Please type your name:", reply_markup=ForceReply(selective=True))
+            self.bot.register_next_step_handler(msg, self._save_name_first_handler)
+            return
+
+        if name.startswith('/'):
+            self.bot.send_message(chat_id, "❌ Setup cancelled. You can type /start to try again.")
+            return
+
+        # Save name in the database first
+        sub = self.storage.get_subscriber(chat_id)
+        existing_bhavana = sub.get('bhavana') if sub else None
+        existing_department = sub.get('department') if sub else None
+        
+        self.storage.upsert_subscriber(chat_id, existing_bhavana, existing_department, name)
+        
+        msg_text = f"Nice to meet you, **{name}**!\n\nPlease select your **Institute (Bhavana)**:"
+        self.bot.send_message(
+            chat_id, 
+            msg_text, 
+            reply_markup=self._build_bhavana_keyboard(),
+            parse_mode="Markdown"
+        )
+
     def setup_commands(self):
         @self.bot.message_handler(commands=['start'])
         @self.ensure_user
         def start_command(message):
             chat_id = message.chat.id
             sub = self.storage.get_subscriber(chat_id)
-            if sub and sub.get('bhavana') and sub.get('department'):
+            if sub and sub.get('bhavana') and sub.get('department') and sub.get('name'):
                 msg_text = (
                     f"👋 You are already subscribed to notice alerts!\n\n"
                     f"**Current Configuration:**\n"
-                    f"🏛️ **Institute (Bhavana):** {sub['bhavana']}\n"
+                    f"👤 **Name:** {sub['name']}\n"
+                    f"🏛️ **Bhavana:** {sub['bhavana']}\n"
                     f"📚 **Department:** {sub['department']}\n\n"
-                    f"If you wish to change your configuration, please use /settings."
+                    f"If you wish to change your configuration, please use /settings or type /start to configure from scratch."
                 )
                 self.bot.send_message(chat_id, msg_text, parse_mode="Markdown")
-            else:
-                msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease configure your subscription by selecting your **Institute (Bhavana)**:"
+                # Wait, they explicitly typed /start, which means they might want to start from scratch.
+                # But to avoid immediate prompt, we require them to click or do it. Let's add a button to reset or just let them send a text?
+                # Actually, let's keep it simple: if they are subscribed, show their config and a button "🔄 Re-subscribe" to trigger name prompt.
+                # Wait! It's much simpler if we just show a button or just proceed if they click a button.
+                # Even better: if they type /start, we show the message and a button "🔄 Reset Subscription".
+                # If they click that button, it runs the name collection.
+                # Let's do that! That's very clean and avoids accidental restarts.
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🔄 Re-subscribe / Reset", callback_data="RESET_SUB"))
                 self.bot.send_message(
                     chat_id, 
-                    msg_text, 
-                    reply_markup=self._build_bhavana_keyboard(),
-                    parse_mode="Markdown"
+                    "Would you like to re-configure your subscription?", 
+                    reply_markup=markup
                 )
+                return
+            
+            # Start the name collection flow directly if they are new or incomplete
+            msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease enter your **Name** to begin:"
+            msg = self.bot.send_message(
+                chat_id, 
+                msg_text, 
+                reply_markup=ForceReply(selective=True),
+                parse_mode="Markdown"
+            )
+            self.bot.register_next_step_handler(msg, self._save_name_first_handler)
 
         @self.bot.message_handler(commands=['settings'])
         @self.ensure_user
         def settings_command(message):
-            msg_text = "🔧 **Subscription Settings**\n\nPlease reconfigure your subscription by selecting your **Institute (Bhavana)**:"
+            chat_id = message.chat.id
+            sub = self.storage.get_subscriber(chat_id)
+            name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
+            msg_text = f"🔧 **Subscription Settings**{name_str}\n\nPlease select your **Institute (Bhavana)**:"
             self.bot.send_message(
-                message.chat.id, 
+                chat_id, 
                 msg_text, 
                 reply_markup=self._build_bhavana_keyboard(),
                 parse_mode="Markdown"
@@ -134,8 +183,8 @@ class BotHandlers:
         def help_command(message):
             help_text = """
             Visva-Bharati Notice Bot Commands:
-            /start - Setup notice alerts
-            /settings - Reconfigure your subscription
+            /start - Setup notice alerts from scratch (Name, Bhavana, Department)
+            /settings - Reconfigure your Institute and Department
             /status - Check current bot status
             /ping - Ping the bot
             /help - Display this help message
@@ -149,6 +198,17 @@ class BotHandlers:
                 self.bot.answer_callback_query(call.id)
                 data = call.data
                 
+                if data == "RESET_SUB":
+                    msg_text = "🔄 Let's reset your subscription.\n\nPlease enter your **Name** to begin:"
+                    msg = self.bot.send_message(
+                        chat_id=call.message.chat.id,
+                        text=msg_text,
+                        reply_markup=ForceReply(selective=True),
+                        parse_mode="Markdown"
+                    )
+                    self.bot.register_next_step_handler(msg, self._save_name_first_handler)
+                    return
+
                 if data == "START":
                     msg_text = "Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
@@ -209,18 +269,24 @@ class BotHandlers:
                     else:
                         dept_name = BHAVANA_DEPARTMENTS_MAP[bhav_name][dept_idx]
                     
+                    chat_id = call.message.chat.id
+                    sub = self.storage.get_subscriber(chat_id)
+                    name = sub.get('name') if sub else "User"
+
                     # Finalize selection
                     success = self.storage.upsert_subscriber(
-                        chat_id=call.message.chat.id,
+                        chat_id=chat_id,
                         bhavana=bhav_name,
-                        department=dept_name
+                        department=dept_name,
+                        name=name
                     )
                     
                     if success:
                         msg_text = (
                             f"✅ **Subscription Confirmed!**\n\n"
+                            f"Welcome, **{name}**!\n"
                             f"You will now receive targeted notices for:\n"
-                            f"🏛️ Institute: {bhav_name}\n"
+                            f"🏛️ Bhavana: {bhav_name}\n"
                             f"📚 Department: {dept_name}\n\n"
                             f"_(Use /settings to change this at any time)_"
                         )

@@ -67,7 +67,7 @@ def test_scraping_and_summarizer(storage, gemini_key, vbu_url):
             logger.info("Summarizing test PDF with Gemini...")
             extraction = summarizer.summarize_pdf(pdf_bytes)
             logger.info(f"SUCCESS: Summary generated:\n{extraction.summary}")
-            logger.info(f"  Levels: {extraction.target_levels}")
+
             logger.info(f"  Institute: {extraction.target_bhavana}")
             logger.info(f"  Dept: {extraction.target_department}")
             logger.info(f"  General: {extraction.is_general}")
