@@ -5,4 +5,4 @@ beautifulsoup4==4.15.0
 google-genai==2.8.0
 schedule==1.2.2
 python-dotenv==1.2.2
-supabase==2.4.1
+supabase==2.31.0
