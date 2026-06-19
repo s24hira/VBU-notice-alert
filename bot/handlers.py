@@ -117,7 +117,7 @@ class BotHandlers:
                     f"👤 **Name:** {sub['name']}\n"
                     f"🏛️ **Bhavana:** {sub['bhavana']}\n"
                     f"📚 **Department:** {sub['department']}\n\n"
-                    f"If you wish to change your configuration, please use /settings or type /start to configure from scratch."
+                    f"If you wish to change your configuration, please use /settings"
                 )
                 self.bot.send_message(chat_id, msg_text, parse_mode="Markdown")
                 return
