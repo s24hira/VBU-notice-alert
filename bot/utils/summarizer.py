@@ -1,6 +1,7 @@
 import os
-from google import genai
-from google.genai import types
+import base64
+import requests
+import json
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 import logging
@@ -85,8 +86,9 @@ class GeminiPDFSummarizer:
         """
         Initialize Gemini PDF Summarizer
         """
-        self.client = genai.Client(api_key=api_key)
+        self.api_key = api_key
         self.model = 'gemini-3.1-flash-lite'
+        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
 
     def summarize_pdf(self, pdf_bytes, max_retries=3, backoff_factor=5) -> NoticeExtraction:
         """
@@ -105,30 +107,58 @@ class GeminiPDFSummarizer:
            - IMPORTANT: If a notice is issued by the central office but involves actions/interests for ALL university students, MUST set is_general to true.
         """
 
+        schema = NoticeExtraction.model_json_schema()
+        # Ensure proper schema formatting for Gemini API
+        gemini_schema = {
+            "type": "OBJECT",
+            "properties": {},
+            "required": schema.get("required", [])
+        }
+        for prop_name, prop_details in schema.get("properties", {}).items():
+            prop_type = prop_details.get("type", "STRING").upper()
+            if prop_type == "NULL":
+                prop_type = "STRING" # Fallback if pydantic gives something strange
+            gemini_schema["properties"][prop_name] = {
+                "type": prop_type,
+                "description": prop_details.get("description", "")
+            }
+            
+        b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "inline_data": {
+                                "mime_type": "application/pdf",
+                                "data": b64_pdf
+                            }
+                        },
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "response_schema": gemini_schema
+            }
+        }
+
         for attempt in range(max_retries):
             try:
                 logging.info(f"Generating summary and categorization from in-memory PDF content (attempt {attempt + 1}/{max_retries})...")
-                response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=[
-                        types.Part.from_bytes(
-                            data=pdf_bytes,
-                            mime_type="application/pdf",
-                        ),
-                        prompt
-                    ],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=NoticeExtraction,
-                    ),
-                )
+                response = requests.post(self.url, headers={"Content-Type": "application/json"}, json=payload)
+                response.raise_for_status()
                 
-                # The returned text is JSON string matching the schema. Pydantic can parse it.
-                if hasattr(response, 'parsed') and response.parsed:
-                    return response.parsed
+                response_data = response.json()
+                text_result = response_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                 
-                # Fallback if parsed is not populated for some reason
-                return NoticeExtraction.model_validate_json(response.text)
+                if not text_result:
+                    raise SummarizationError("Empty response from Gemini API.")
+                    
+                return NoticeExtraction.model_validate_json(text_result)
 
             except Exception as e:
                 logging.error(f"Error in Gemini summarization (attempt {attempt + 1}/{max_retries}): {e}")

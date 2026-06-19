@@ -59,6 +59,11 @@ class NoticeProcessor:
                             'date': notice_date
                         })
 
+                # Free memory
+                del notice_boxes
+                del soup
+                del response
+
                 return new_notices
 
             except Exception as e:
@@ -116,6 +121,7 @@ PDF Link: {notice['link']}
                 logger.error(f"Telegram message send error to user {user_id}: {e}")
 
     def process_new_notices(self, bot):
+        import gc
         try:
             logger.info("Checking for new notices")
             new_notices = self.scrape_notices()
@@ -172,6 +178,15 @@ PDF Link: {notice['link']}
 
                 except Exception as e:
                     logger.error(f"Notice processing error: {e}")
+                finally:
+                    # Clear memory for each notice processed
+                    if 'pdf_bytes' in locals():
+                        del pdf_bytes
+                    if 'extraction' in locals():
+                        del extraction
 
         except Exception as e:
             logger.error(f"Error in process_new_notices: {e}")
+        finally:
+            # Force garbage collection
+            gc.collect()

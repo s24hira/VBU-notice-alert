@@ -120,20 +120,6 @@ class BotHandlers:
                     f"If you wish to change your configuration, please use /settings or type /start to configure from scratch."
                 )
                 self.bot.send_message(chat_id, msg_text, parse_mode="Markdown")
-                # Wait, they explicitly typed /start, which means they might want to start from scratch.
-                # But to avoid immediate prompt, we require them to click or do it. Let's add a button to reset or just let them send a text?
-                # Actually, let's keep it simple: if they are subscribed, show their config and a button "🔄 Re-subscribe" to trigger name prompt.
-                # Wait! It's much simpler if we just show a button or just proceed if they click a button.
-                # Even better: if they type /start, we show the message and a button "🔄 Reset Subscription".
-                # If they click that button, it runs the name collection.
-                # Let's do that! That's very clean and avoids accidental restarts.
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🔄 Re-subscribe / Reset", callback_data="RESET_SUB"))
-                self.bot.send_message(
-                    chat_id, 
-                    "Would you like to re-configure your subscription?", 
-                    reply_markup=markup
-                )
                 return
             
             # Start the name collection flow directly if they are new or incomplete
@@ -198,17 +184,6 @@ class BotHandlers:
                 self.bot.answer_callback_query(call.id)
                 data = call.data
                 
-                if data == "RESET_SUB":
-                    msg_text = "🔄 Let's reset your subscription.\n\nPlease enter your **Name** to begin:"
-                    msg = self.bot.send_message(
-                        chat_id=call.message.chat.id,
-                        text=msg_text,
-                        reply_markup=ForceReply(selective=True),
-                        parse_mode="Markdown"
-                    )
-                    self.bot.register_next_step_handler(msg, self._save_name_first_handler)
-                    return
-
                 if data == "START":
                     msg_text = "Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
