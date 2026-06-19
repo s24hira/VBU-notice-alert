@@ -2,8 +2,74 @@ import os
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Literal
 import logging
+
+from bot.constants import ACADEMIC_LEVELS, BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
+
+# Flatten all departments from the constants map
+ALL_DEPARTMENTS = []
+for depts in BHAVANA_DEPARTMENTS_MAP.values():
+    ALL_DEPARTMENTS.extend(depts)
+
+# Create Literal types for strict constraint enforcement
+AcademicLevel = Literal["UG", "PG", "Ph.D. & Research", "Certificate/Diploma", "School", "Office"]
+
+BhavanaType = Literal[
+    "Palli Siksha Bhavana",
+    "Siksha Bhavana",
+    "Vidya Bhavana",
+    "Bhasha Bhavana",
+    "Kala Bhavana",
+    "Sangit Bhavana",
+    "Vinaya Bhavana",
+    "PSV",
+    "Schools & Independent Centres",
+    "Central Administration / Office"
+]
+
+DepartmentType = Literal[
+    # Palli Siksha Bhavana
+    "Agronomy", "Plant Pathology", "Agricultural Entomology", 
+    "Agricultural Economics", "Agricultural Extension", 
+    "Agricultural Statistics", "Soil Science & Agricultural Chemistry", 
+    "Horticulture & Post-Harvest Technology", "Genetics & Plant Breeding", 
+    "Crop Physiology", "Agricultural Engineering", "Animal Science",
+    # Siksha Bhavana
+    "Mathematics", "Physics", "Chemistry", "Botany", "Zoology", 
+    "Computer & System Sciences", "Statistics", "Environmental Studies", 
+    "Biotechnology", "Integrated Science Education & Research Centre (ISERC)",
+    # Vidya Bhavana
+    "Economics & Politics", "History", 
+    "Ancient Indian History Culture & Archaeology (AIHCA)", 
+    "Anthropology", "Geography", "Philosophy & Comparative Religion", 
+    "Centre for Journalism & Mass Communication (CJMC)", 
+    "Centre for Women's Studies", "Centre for Buddhist Studies",
+    # Bhasha Bhavana
+    "Bengali", "English", "Hindi", "Sanskrit Pali & Prakrit", 
+    "Odia", "Marathi", "Santali", "Assamese", "Tamil", 
+    "Indo-Tibetan Studies", "Chinese Language & Culture", "Japanese", 
+    "Arabic Persian Urdu & Islamic Studies", 
+    "Centre for Modern European Languages Literatures & Culture Studies (CMELLCS)", 
+    "Centre for Comparative Literature", "Centre for Endangered Languages",
+    # Kala Bhavana
+    "History of Art", "Painting", "Sculpture", "Graphic Art (Printmaking)", 
+    "Ceramic & Glass Design", "Textile Design",
+    # Sangit Bhavana
+    "Hindustani Classical Music", "Rabindra Sangit Dance & Drama (RSDD)",
+    # Vinaya Bhavana
+    "Education", "Physical Education & Sport Science", "Yogic Art & Science",
+    # PSV
+    "Social Work", "Lifelong Learning & Extension (REC)", 
+    "Rural Studies (Palli Charcha Kendra / PCK)", "Silpa-Sadana",
+    # Schools & Independent Centres
+    "Patha Bhavana", "Siksha Satra", "Rabindra Bhavana", "Granthana Vibhaga", 
+    "Rathindra Krishi Vigyan Kendra", "A.K. Dasgupta Centre for Planning & Development",
+    # Central Administration / Office
+    "Central Office", "Academic & Research", "Examination", "Establishment", 
+    "Accounts", "Estate", "Security", "Library", "Public Relations", 
+    "Engineering", "Health Centre"
+]
 
 # Define a custom exception for summarization errors
 class SummarizationError(Exception):
@@ -11,9 +77,9 @@ class SummarizationError(Exception):
 
 class NoticeExtraction(BaseModel):
     summary: str = Field(description="A concise bullet-point summary. Only include key actionable points. NO markdown asterisks.")
-    target_levels: Optional[List[str]] = Field(description="List of targeted academic levels (e.g. 'UG', 'PG', 'Ph.D. & Research', 'Certificate/Diploma'). Empty if general.")
-    target_bhavana: Optional[str] = Field(description="Targeted Institute (Bhavana) name if specified, otherwise null.")
-    target_department: Optional[str] = Field(description="Targeted Department name if specified, otherwise null.")
+    target_levels: Optional[List[AcademicLevel]] = Field(description="List of targeted academic levels. Empty if general or not specified.")
+    target_bhavana: Optional[BhavanaType] = Field(description="Targeted Institute (Bhavana) name if specified, otherwise null.")
+    target_department: Optional[DepartmentType] = Field(description="Targeted Department name if specified, otherwise null.")
     is_general: bool = Field(description="True if the notice applies to all students/general audience, False if it targets specific levels/bhavanas.")
 
 class GeminiPDFSummarizer:
@@ -22,26 +88,34 @@ class GeminiPDFSummarizer:
         Initialize Gemini PDF Summarizer
         """
         self.client = genai.Client(api_key=api_key)
-        self.model = 'gemini-3-flash-preview'
+        self.model = 'gemini-3.1-flash-lite'
 
-    def summarize_pdf(self, pdf_bytes) -> NoticeExtraction:
+    def summarize_pdf(self, pdf_bytes, max_retries=3, backoff_factor=5) -> NoticeExtraction:
         """
         Summarize a PDF and extract target audience parameters.
         Returns a NoticeExtraction pydantic object.
         """
-        try:
-            prompt = """
-            Analyze the provided Visva-Bharati notice PDF.
-            Extract the following information:
-            1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
-            2. target_levels: Determine if this applies to 'UG', 'PG', 'Ph.D. & Research', or 'Certificate/Diploma'. Return a list of matching levels, or empty if it applies to everyone or isn't specified.
-            3. target_bhavana: The exact Institute (Bhavana) name if specified (e.g., 'Siksha Bhavana', 'Vidya Bhavana', 'Palli Siksha Bhavana'). Null if not mentioned.
-            4. target_department: The exact Department name if specified (e.g., 'Computer & System Sciences', 'Agronomy'). Null if not mentioned.
-            5. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular levels/institutes/departments.
-            """
+        import time
+        prompt = """
+        Analyze the provided Visva-Bharati notice PDF.
+        Extract the following information:
+        1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
+        2. target_levels: Determine which academic levels this notice applies to. It MUST only be a list containing one or more of the allowed schema enum values: 'UG', 'PG', 'Ph.D. & Research', 'Certificate/Diploma', 'School', 'Office'. 
+           - Map undergraduate/B.Sc/B.A/B.Com to 'UG'.
+           - Map postgraduate/M.Sc/M.A/M.Com to 'PG'.
+           - Map PhD/Research scholars/M.Phil to 'Ph.D. & Research'.
+           - Map Diploma/Certificate/Advanced Diploma to 'Certificate/Diploma'.
+           - Map school-related notices (e.g., Patha Bhavana, Siksha Satra) to 'School'.
+           - Map administrative orders, staff notices, and office communications to 'Office'.
+           - Return an empty list if it applies broadly to everyone or isn't specified.
+        3. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
+        4. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
+        5. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular levels/institutes/departments.
+        """
 
+        for attempt in range(max_retries):
             try:
-                logging.info("Generating summary and categorization from in-memory PDF content...")
+                logging.info(f"Generating summary and categorization from in-memory PDF content (attempt {attempt + 1}/{max_retries})...")
                 response = self.client.models.generate_content(
                     model=self.model,
                     contents=[
@@ -58,7 +132,6 @@ class GeminiPDFSummarizer:
                 )
                 
                 # The returned text is JSON string matching the schema. Pydantic can parse it.
-                # Actually, in google-genai 2.8.0, response.parsed contains the Pydantic object if schema is provided.
                 if hasattr(response, 'parsed') and response.parsed:
                     return response.parsed
                 
@@ -66,9 +139,12 @@ class GeminiPDFSummarizer:
                 return NoticeExtraction.model_validate_json(response.text)
 
             except Exception as e:
-                logging.error(f"Error in Gemini summarization: {e}")
-                raise SummarizationError("Failed to generate structured summary from Gemini.")
+                logging.error(f"Error in Gemini summarization (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    sleep_time = backoff_factor * (2 ** attempt)
+                    logging.info(f"Retrying in {sleep_time} seconds...")
+                    time.sleep(sleep_time)
+                else:
+                    raise SummarizationError(f"Failed to generate structured summary from Gemini after {max_retries} attempts.")
 
-        except Exception as e:
-            logging.error(f"Error processing PDF: {e}")
-            raise SummarizationError("An unexpected error occurred during PDF processing.")
+        raise SummarizationError("An unexpected error occurred during PDF processing.")

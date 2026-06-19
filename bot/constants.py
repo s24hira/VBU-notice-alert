@@ -2,7 +2,9 @@ ACADEMIC_LEVELS = [
     "UG",
     "PG",
     "Ph.D. & Research",
-    "Certificate/Diploma"
+    "Certificate/Diploma",
+    "School",
+    "Office"
 ]
 
 BHAVANA_DEPARTMENTS_MAP = {
@@ -50,6 +52,11 @@ BHAVANA_DEPARTMENTS_MAP = {
     "Schools & Independent Centres": [
         "Patha Bhavana", "Siksha Satra", "Rabindra Bhavana", "Granthana Vibhaga", 
         "Rathindra Krishi Vigyan Kendra", "A.K. Dasgupta Centre for Planning & Development"
+    ],
+    "Central Administration / Office": [
+        "Central Office", "Academic & Research", "Examination", "Establishment", 
+        "Accounts", "Estate", "Security", "Library", "Public Relations", 
+        "Engineering", "Health Centre"
     ]
 }
 

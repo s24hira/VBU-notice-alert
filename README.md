@@ -8,6 +8,8 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 
 - **Automated Monitoring:** Continuously scans the Visva-Bharati website for new notices at randomized, natural intervals (5–8 minutes).
 - **Direct PDF Summarization:** Uses Google's modern **Gemini GenAI Client** to summarize PDFs inline and extract target audience parameters.
+- **Strict Notice Processing:** Mandates successful summary extraction. If summarization fails or returns empty, the notice is skipped and intelligently deferred for retry.
+- **Intelligent Retry Logic:** Integrates an exponential backoff mechanism for the Gemini API to gracefully handle sudden rate-limiting or 503 unavailability errors.
 - **Instant Targeted Alerts:** Dispatches notice titles, links, and summaries. Users receive notifications perfectly matched to their academic level, institute, and department configurations!
 - **Interactive UI:** Configure your subscription seamlessly using our 3-Step Telegram Inline Keyboard flow.
 - **Robust Storage:** Powered by **Supabase** (PostgreSQL) for resilient, structured tracking of subscribers and notices.

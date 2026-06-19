@@ -122,7 +122,6 @@ PDF Link: {notice['link']}
             logger.info(f"Found {len(new_notices)} new notices")
 
             for notice in new_notices:
-                extraction: NoticeExtraction = None
                 try:
                     logger.info(f"Processing notice: {notice['title']}")
                     pdf_bytes = self.download_pdf_bytes(notice['link'])
@@ -134,7 +133,14 @@ PDF Link: {notice['link']}
                         extraction = self.summarizer.summarize_pdf(pdf_bytes)
                     except SummarizationError as e:
                         logger.error(f"Summarization failed: {e}")
+                        logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to summarization failure.")
+                        continue
                     
+                    if not extraction or not extraction.summary:
+                        logger.error("Strict requirement not met: Extraction yielded empty summary.")
+                        logger.warning(f"Skipping notice '{notice['title']}'.")
+                        continue
+
                     # Sleep to respect the Gemini API free tier rate limit (15 requests per minute)
                     time.sleep(5)
 
@@ -143,11 +149,11 @@ PDF Link: {notice['link']}
                         'title': notice['title'],
                         'link': notice['link'],
                         'date': notice['date'],
-                        'summary': extraction.summary if extraction else "Summary not available.",
-                        'target_levels': extraction.target_levels if extraction else [],
-                        'target_bhavana': extraction.target_bhavana if extraction else None,
-                        'target_department': extraction.target_department if extraction else None,
-                        'is_general': extraction.is_general if extraction else True,
+                        'summary': extraction.summary,
+                        'target_levels': extraction.target_levels if extraction.target_levels else [],
+                        'target_bhavana': extraction.target_bhavana,
+                        'target_department': extraction.target_department,
+                        'is_general': extraction.is_general,
                         'status': 'New'
                     }
 
