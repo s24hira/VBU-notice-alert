@@ -10,8 +10,8 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 - **Direct PDF Summarization:** Uses Google's modern **Gemini GenAI Client** to summarize PDFs inline and extract target audience parameters.
 - **Strict Notice Processing:** Mandates successful summary extraction. If summarization fails or returns empty, the notice is skipped and intelligently deferred for retry.
 - **Intelligent Retry Logic:** Integrates an exponential backoff mechanism for the Gemini API to gracefully handle sudden rate-limiting or 503 unavailability errors.
-- **Instant Targeted Alerts:** Dispatches notice titles, links, and summaries. Users receive notifications perfectly matched to their academic level, institute, and department configurations!
-- **Interactive UI:** Configure your subscription seamlessly using our 3-Step Telegram Inline Keyboard flow.
+- **Instant Targeted Alerts:** Dispatches notice titles, links, and summaries. Users receive notifications perfectly matched to their institute and department configurations!
+- **Interactive UI:** Configure your subscription seamlessly using our 2-Step Telegram Inline Keyboard flow.
 - **Robust Storage:** Powered by **Supabase** (PostgreSQL) for resilient, structured tracking of subscribers and notices.
 - **Interactive Verification**: Includes an end-to-end `test_alert.py` testing script to instantly verify the scraper, Gemini API, and Telegram alerts.
 
@@ -87,7 +87,7 @@ VBU_WEBSITE_URL=https://www.visvabharati.ac.in/home/all-notices/
 
 Interact with the bot on Telegram using:
 
-- `/start` - Setup notice alerts via the 3-step UI configuration (Level -> Institute -> Department).
+- `/start` - Setup notice alerts via the 2-step UI configuration (Institute -> Department).
 - `/settings` - Reconfigure your subscription perfectly matching your needs.
 - `/status` - Check current bot status.
 - `/ping` - Confirm bot is online (responds with `Pong!`).
@@ -101,7 +101,7 @@ Interact with the bot on Telegram using:
 ├── bot/
 │   ├── utils/
 │   │   └── summarizer.py     # Gemini structured extraction and summary logic
-│   ├── constants.py          # Categorization constants (Levels, Bhavanas, Depts)
+│   ├── constants.py          # Categorization constants (Bhavanas, Depts)
 │   ├── handlers.py           # Telegram command and inline callback handlers
 │   ├── notice_processor.py   # Scraper, target-filtering, and alert coordinator
 │   └── storage.py            # Supabase PostgreSQL database integration

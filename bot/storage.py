@@ -38,15 +38,14 @@ class SupabaseStorage:
             logger.error(f"Error adding user {chat_id} to Supabase: {e}")
             return False
 
-    def upsert_subscriber(self, chat_id, level, bhavana, department):
+    def upsert_subscriber(self, chat_id, bhavana, department):
         try:
             self.supabase.table('subscribers').upsert({
                 'telegram_chat_id': chat_id,
-                'academic_level': level,
                 'bhavana': bhavana,
                 'department': department
             }).execute()
-            logger.info(f"Subscriber {chat_id} upserted with selections: {level}, {bhavana}, {department}.")
+            logger.info(f"Subscriber {chat_id} upserted with selections: {bhavana}, {department}.")
             return True
         except Exception as e:
             logger.error(f"Error upserting subscriber {chat_id}: {e}")
@@ -72,25 +71,18 @@ class SupabaseStorage:
             return []
 
     def get_matching_subscribers(self, notice_data):
-        # notice_data should contain target_levels, target_bhavana, target_department, is_general
+        # notice_data should contain target_bhavana, target_department, is_general
         try:
             if notice_data.get('is_general', False):
                 return self.get_all_users()
 
-            target_levels = notice_data.get('target_levels') or []
             target_bhavana = notice_data.get('target_bhavana')
             target_department = notice_data.get('target_department')
 
             query = self.supabase.table('subscribers').select('telegram_chat_id')
 
-            # We need to construct the matching logic. 
-            # If target_levels is provided, match if user's academic_level is in target_levels.
-            if target_levels:
-                query = query.in_('academic_level', target_levels)
-            
             if target_bhavana:
                 query = query.eq('bhavana', target_bhavana)
-            
             if target_department:
                 query = query.in_('department', [target_department, 'All'])
 
@@ -119,7 +111,6 @@ class SupabaseStorage:
             new_notice = {
                 'title': notice_data.get('title'),
                 'link': notice_data.get('link'),
-                'target_levels': notice_data.get('target_levels', []),
                 'target_bhavana': notice_data.get('target_bhavana'),
                 'target_department': notice_data.get('target_department'),
                 'is_general': notice_data.get('is_general', False),

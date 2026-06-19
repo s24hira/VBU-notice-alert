@@ -150,7 +150,6 @@ PDF Link: {notice['link']}
                         'link': notice['link'],
                         'date': notice['date'],
                         'summary': extraction.summary,
-                        'target_levels': extraction.target_levels if extraction.target_levels else [],
                         'target_bhavana': extraction.target_bhavana,
                         'target_department': extraction.target_department,
                         'is_general': extraction.is_general,

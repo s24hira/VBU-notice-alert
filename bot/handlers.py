@@ -4,7 +4,7 @@ import logging
 import time
 from functools import wraps
 
-from bot.constants import ACADEMIC_LEVELS, BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
+from bot.constants import BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -26,39 +26,28 @@ class BotHandlers:
             return func(message)
         return wrapper
 
-    def _build_level_keyboard(self):
-        markup = InlineKeyboardMarkup(row_width=2)
-        buttons = []
-        for idx, lvl in enumerate(ACADEMIC_LEVELS):
-            # Payload: L:{level_idx}
-            buttons.append(InlineKeyboardButton(lvl, callback_data=f"L:{idx}"))
-        markup.add(*buttons)
-        return markup
-
-    def _build_bhavana_keyboard(self, lvl_idx, page=0):
+    def _build_bhavana_keyboard(self, page=0):
         markup = InlineKeyboardMarkup(row_width=1)
         start_idx = page * ITEMS_PER_PAGE
         end_idx = start_idx + ITEMS_PER_PAGE
         
         for idx in range(start_idx, min(end_idx, len(BHAVANAS_LIST))):
             bhavana = BHAVANAS_LIST[idx]
-            # Payload: B:{lvl_idx}:{bhav_idx}
-            markup.add(InlineKeyboardButton(bhavana, callback_data=f"B:{lvl_idx}:{idx}"))
+            # Payload: B:{bhav_idx}
+            markup.add(InlineKeyboardButton(bhavana, callback_data=f"B:{idx}"))
             
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton("◄ Prev", callback_data=f"PB:{lvl_idx}:{page-1}"))
+            nav_buttons.append(InlineKeyboardButton("◄ Prev", callback_data=f"PB:{page-1}"))
         if end_idx < len(BHAVANAS_LIST):
-            nav_buttons.append(InlineKeyboardButton("Next ►", callback_data=f"PB:{lvl_idx}:{page+1}"))
+            nav_buttons.append(InlineKeyboardButton("Next ►", callback_data=f"PB:{page+1}"))
             
         if nav_buttons:
             markup.add(*nav_buttons)
             
-        # Add a back button to levels
-        markup.add(InlineKeyboardButton("🔙 Back to Levels", callback_data="START"))
         return markup
 
-    def _build_dept_keyboard(self, lvl_idx, bhav_idx, page=0):
+    def _build_dept_keyboard(self, bhav_idx, page=0):
         markup = InlineKeyboardMarkup(row_width=1)
         bhavana_name = BHAVANAS_LIST[bhav_idx]
         depts = BHAVANA_DEPARTMENTS_MAP[bhavana_name]
@@ -67,24 +56,24 @@ class BotHandlers:
         end_idx = start_idx + ITEMS_PER_PAGE
         
         if page == 0:
-            markup.add(InlineKeyboardButton("🌟 All (Entire Bhavana)", callback_data=f"D:{lvl_idx}:{bhav_idx}:-1"))
+            markup.add(InlineKeyboardButton("🌟 All (Entire Bhavana)", callback_data=f"D:{bhav_idx}:-1"))
         
         for idx in range(start_idx, min(end_idx, len(depts))):
             dept = depts[idx]
-            # Payload: D:{lvl_idx}:{bhav_idx}:{dept_idx}
-            markup.add(InlineKeyboardButton(dept, callback_data=f"D:{lvl_idx}:{bhav_idx}:{idx}"))
+            # Payload: D:{bhav_idx}:{dept_idx}
+            markup.add(InlineKeyboardButton(dept, callback_data=f"D:{bhav_idx}:{idx}"))
             
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton("◄ Prev", callback_data=f"PD:{lvl_idx}:{bhav_idx}:{page-1}"))
+            nav_buttons.append(InlineKeyboardButton("◄ Prev", callback_data=f"PD:{bhav_idx}:{page-1}"))
         if end_idx < len(depts):
-            nav_buttons.append(InlineKeyboardButton("Next ►", callback_data=f"PD:{lvl_idx}:{bhav_idx}:{page+1}"))
+            nav_buttons.append(InlineKeyboardButton("Next ►", callback_data=f"PD:{bhav_idx}:{page+1}"))
             
         if nav_buttons:
             markup.add(*nav_buttons)
             
         # Add back button to bhavanas
-        markup.add(InlineKeyboardButton("🔙 Back to Institutes", callback_data=f"L:{lvl_idx}"))
+        markup.add(InlineKeyboardButton("🔙 Back to Institutes", callback_data="START"))
         return markup
 
     def setup_commands(self):
@@ -93,33 +82,32 @@ class BotHandlers:
         def start_command(message):
             chat_id = message.chat.id
             sub = self.storage.get_subscriber(chat_id)
-            if sub and sub.get('academic_level') and sub.get('bhavana') and sub.get('department'):
+            if sub and sub.get('bhavana') and sub.get('department'):
                 msg_text = (
                     f"👋 You are already subscribed to notice alerts!\n\n"
                     f"**Current Configuration:**\n"
-                    f"🎓 **Academic Level:** {sub['academic_level']}\n"
                     f"🏛️ **Institute (Bhavana):** {sub['bhavana']}\n"
                     f"📚 **Department:** {sub['department']}\n\n"
                     f"If you wish to change your configuration, please use /settings."
                 )
                 self.bot.send_message(chat_id, msg_text, parse_mode="Markdown")
             else:
-                msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease configure your subscription by selecting your **Academic Level**:"
+                msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease configure your subscription by selecting your **Institute (Bhavana)**:"
                 self.bot.send_message(
                     chat_id, 
                     msg_text, 
-                    reply_markup=self._build_level_keyboard(),
+                    reply_markup=self._build_bhavana_keyboard(),
                     parse_mode="Markdown"
                 )
 
         @self.bot.message_handler(commands=['settings'])
         @self.ensure_user
         def settings_command(message):
-            msg_text = "🔧 **Subscription Settings**\n\nPlease reconfigure your subscription by selecting your **Academic Level**:"
+            msg_text = "🔧 **Subscription Settings**\n\nPlease reconfigure your subscription by selecting your **Institute (Bhavana)**:"
             self.bot.send_message(
                 message.chat.id, 
                 msg_text, 
-                reply_markup=self._build_level_keyboard(),
+                reply_markup=self._build_bhavana_keyboard(),
                 parse_mode="Markdown"
             )
 
@@ -162,12 +150,12 @@ class BotHandlers:
                 data = call.data
                 
                 if data == "START":
-                    msg_text = "Please select your **Academic Level**:"
+                    msg_text = "Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
                         chat_id=call.message.chat.id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_level_keyboard(),
+                        reply_markup=self._build_bhavana_keyboard(page=0),
                         parse_mode="Markdown"
                     )
                     return
@@ -175,66 +163,46 @@ class BotHandlers:
                 parts = data.split(':')
                 action = parts[0]
                 
-                if action == 'L':
-                    lvl_idx = int(parts[1])
-                    lvl_name = ACADEMIC_LEVELS[lvl_idx]
-                    msg_text = f"Level: {lvl_name}\n\nPlease select your **Institute (Bhavana)**:"
+                if action == 'PB':
+                    page = int(parts[1])
+                    msg_text = f"Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
                         chat_id=call.message.chat.id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_bhavana_keyboard(lvl_idx, page=0),
-                        parse_mode="Markdown"
-                    )
-                
-                elif action == 'PB':
-                    lvl_idx = int(parts[1])
-                    page = int(parts[2])
-                    lvl_name = ACADEMIC_LEVELS[lvl_idx]
-                    msg_text = f"Level: {lvl_name}\n\nPlease select your **Institute (Bhavana)**:"
-                    self.bot.edit_message_text(
-                        chat_id=call.message.chat.id,
-                        message_id=call.message.message_id,
-                        text=msg_text,
-                        reply_markup=self._build_bhavana_keyboard(lvl_idx, page=page),
+                        reply_markup=self._build_bhavana_keyboard(page=page),
                         parse_mode="Markdown"
                     )
 
                 elif action == 'B':
-                    lvl_idx = int(parts[1])
-                    bhav_idx = int(parts[2])
-                    lvl_name = ACADEMIC_LEVELS[lvl_idx]
+                    bhav_idx = int(parts[1])
                     bhav_name = BHAVANAS_LIST[bhav_idx]
-                    msg_text = f"Level: {lvl_name}\nInstitute: {bhav_name}\n\nPlease select your **Department/Centre**:"
+                    msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
                         chat_id=call.message.chat.id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_dept_keyboard(lvl_idx, bhav_idx, page=0),
+                        reply_markup=self._build_dept_keyboard(bhav_idx, page=0),
                         parse_mode="Markdown"
                     )
 
                 elif action == 'PD':
-                    lvl_idx = int(parts[1])
-                    bhav_idx = int(parts[2])
-                    page = int(parts[3])
-                    lvl_name = ACADEMIC_LEVELS[lvl_idx]
+                    bhav_idx = int(parts[1])
+                    page = int(parts[2])
                     bhav_name = BHAVANAS_LIST[bhav_idx]
-                    msg_text = f"Level: {lvl_name}\nInstitute: {bhav_name}\n\nPlease select your **Department/Centre**:"
+                    msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
                         chat_id=call.message.chat.id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_dept_keyboard(lvl_idx, bhav_idx, page=page),
+                        reply_markup=self._build_dept_keyboard(bhav_idx, page=page),
                         parse_mode="Markdown"
                     )
 
                 elif action == 'D':
-                    lvl_idx = int(parts[1])
-                    bhav_idx = int(parts[2])
-                    dept_idx = int(parts[3])
+                    bhav_idx = int(parts[1])
+                    dept_idx = int(parts[2])
                     
-                    lvl_name = ACADEMIC_LEVELS[lvl_idx]
                     bhav_name = BHAVANAS_LIST[bhav_idx]
                     if dept_idx == -1:
                         dept_name = "All"
@@ -244,7 +212,6 @@ class BotHandlers:
                     # Finalize selection
                     success = self.storage.upsert_subscriber(
                         chat_id=call.message.chat.id,
-                        level=lvl_name,
                         bhavana=bhav_name,
                         department=dept_name
                     )
@@ -253,7 +220,6 @@ class BotHandlers:
                         msg_text = (
                             f"✅ **Subscription Confirmed!**\n\n"
                             f"You will now receive targeted notices for:\n"
-                            f"🎓 Level: {lvl_name}\n"
                             f"🏛️ Institute: {bhav_name}\n"
                             f"📚 Department: {dept_name}\n\n"
                             f"_(Use /settings to change this at any time)_"

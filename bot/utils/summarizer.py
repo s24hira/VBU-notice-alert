@@ -5,15 +5,13 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 import logging
 
-from bot.constants import ACADEMIC_LEVELS, BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
+from bot.constants import BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
 
 # Flatten all departments from the constants map
 ALL_DEPARTMENTS = []
 for depts in BHAVANA_DEPARTMENTS_MAP.values():
     ALL_DEPARTMENTS.extend(depts)
 
-# Create Literal types for strict constraint enforcement
-AcademicLevel = Literal["UG", "PG", "Ph.D. & Research", "Certificate/Diploma", "School", "Office"]
 
 BhavanaType = Literal[
     "Palli Siksha Bhavana",
@@ -77,7 +75,7 @@ class SummarizationError(Exception):
 
 class NoticeExtraction(BaseModel):
     summary: str = Field(description="A concise bullet-point summary. Only include key actionable points. NO markdown asterisks.")
-    target_levels: Optional[List[AcademicLevel]] = Field(description="List of targeted academic levels. Empty if general or not specified.")
+
     target_bhavana: Optional[BhavanaType] = Field(description="Targeted Institute (Bhavana) name if specified, otherwise null.")
     target_department: Optional[DepartmentType] = Field(description="Targeted Department name if specified, otherwise null.")
     is_general: bool = Field(description="True if the notice applies to all students/general audience, False if it targets specific levels/bhavanas.")
@@ -100,17 +98,9 @@ class GeminiPDFSummarizer:
         Analyze the provided Visva-Bharati notice PDF.
         Extract the following information:
         1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
-        2. target_levels: Determine which academic levels this notice applies to. It MUST only be a list containing one or more of the allowed schema enum values: 'UG', 'PG', 'Ph.D. & Research', 'Certificate/Diploma', 'School', 'Office'. 
-           - Map undergraduate/B.Sc/B.A/B.Com to 'UG'.
-           - Map postgraduate/M.Sc/M.A/M.Com to 'PG'.
-           - Map PhD/Research scholars/M.Phil to 'Ph.D. & Research'.
-           - Map Diploma/Certificate/Advanced Diploma to 'Certificate/Diploma'.
-           - Map school-related notices (e.g., Patha Bhavana, Siksha Satra) to 'School'.
-           - Map administrative orders, staff notices, and office communications to 'Office'.
-           - Return an empty list if it applies broadly to everyone or isn't specified.
-        3. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
-        4. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
-        5. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular levels/institutes/departments.
+        2. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
+        3. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
+        4. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular institutes/departments.
         """
 
         for attempt in range(max_retries):

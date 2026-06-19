@@ -1,11 +1,4 @@
-ACADEMIC_LEVELS = [
-    "UG",
-    "PG",
-    "Ph.D. & Research",
-    "Certificate/Diploma",
-    "School",
-    "Office"
-]
+
 
 BHAVANA_DEPARTMENTS_MAP = {
     "Palli Siksha Bhavana": [
