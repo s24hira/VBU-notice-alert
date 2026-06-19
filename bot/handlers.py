@@ -26,7 +26,7 @@ class BotHandlers:
             return func(message)
         return wrapper
 
-    def _build_bhavana_keyboard(self, page=0):
+    def _build_bhavana_keyboard(self, page=0, show_cancel=False):
         markup = InlineKeyboardMarkup(row_width=1)
         start_idx = page * ITEMS_PER_PAGE
         end_idx = start_idx + ITEMS_PER_PAGE
@@ -38,16 +38,18 @@ class BotHandlers:
             
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton("◄ Prev", callback_data=f"PB:{page-1}"))
+            nav_buttons.append(InlineKeyboardButton("◄ Back", callback_data=f"PB:{page-1}"))
         if end_idx < len(BHAVANAS_LIST):
             nav_buttons.append(InlineKeyboardButton("Next ►", callback_data=f"PB:{page+1}"))
             
         if nav_buttons:
             markup.add(*nav_buttons)
             
+        if show_cancel:
+            markup.add(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL"))
         return markup
 
-    def _build_dept_keyboard(self, bhav_idx, page=0):
+    def _build_dept_keyboard(self, bhav_idx, page=0, show_cancel=False):
         markup = InlineKeyboardMarkup(row_width=1)
         bhavana_name = BHAVANAS_LIST[bhav_idx]
         depts = BHAVANA_DEPARTMENTS_MAP[bhavana_name]
@@ -65,7 +67,7 @@ class BotHandlers:
             
         nav_buttons = []
         if page > 0:
-            nav_buttons.append(InlineKeyboardButton("◄ Prev", callback_data=f"PD:{bhav_idx}:{page-1}"))
+            nav_buttons.append(InlineKeyboardButton("◄ Back", callback_data=f"PD:{bhav_idx}:{page-1}"))
         if end_idx < len(depts):
             nav_buttons.append(InlineKeyboardButton("Next ►", callback_data=f"PD:{bhav_idx}:{page+1}"))
             
@@ -74,6 +76,8 @@ class BotHandlers:
             
         # Add back button to bhavanas
         markup.add(InlineKeyboardButton("🔙 Back to Institutes", callback_data="START"))
+        if show_cancel:
+            markup.add(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL"))
         return markup
 
     def _save_name_first_handler(self, message):
@@ -139,10 +143,11 @@ class BotHandlers:
             sub = self.storage.get_subscriber(chat_id)
             name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
             msg_text = f"🔧 **Subscription Settings**{name_str}\n\nPlease select your **Institute (Bhavana)**:"
+            is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
             self.bot.send_message(
                 chat_id, 
                 msg_text, 
-                reply_markup=self._build_bhavana_keyboard(),
+                reply_markup=self._build_bhavana_keyboard(page=0, show_cancel=is_existing),
                 parse_mode="Markdown"
             )
 
@@ -164,19 +169,6 @@ class BotHandlers:
                 message_id=sent_message.message_id
             )
 
-        @self.bot.message_handler(commands=['help'])
-        @self.ensure_user
-        def help_command(message):
-            help_text = """
-            Visva-Bharati Notice Bot Commands:
-            /start - Setup notice alerts from scratch (Name, Bhavana, Department)
-            /settings - Reconfigure your Institute and Department
-            /status - Check current bot status
-            /ping - Ping the bot
-            /help - Display this help message
-            """
-            self.bot.reply_to(message, help_text)
-
         # CALLBACK QUERY HANDLERS
         @self.bot.callback_query_handler(func=lambda call: True)
         def callback_query(call):
@@ -185,12 +177,37 @@ class BotHandlers:
                 data = call.data
                 
                 if data == "START":
+                    chat_id = call.message.chat.id
+                    sub = self.storage.get_subscriber(chat_id)
+                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
                     msg_text = "Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
-                        chat_id=call.message.chat.id,
+                        chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_bhavana_keyboard(page=0),
+                        reply_markup=self._build_bhavana_keyboard(page=0, show_cancel=is_existing),
+                        parse_mode="Markdown"
+                    )
+                    return
+
+                if data == "CANCEL":
+                    chat_id = call.message.chat.id
+                    sub = self.storage.get_subscriber(chat_id)
+                    if sub and sub.get('bhavana') and sub.get('department') and sub.get('name'):
+                        msg_text = (
+                            f"❌ **Settings change cancelled.**\n\n"
+                            f"**Current Configuration:**\n"
+                            f"👤 **Name:** {sub['name']}\n"
+                            f"🏛️ **Bhavana:** {sub['bhavana']}\n"
+                            f"📚 **Department:** {sub['department']}"
+                        )
+                    else:
+                        msg_text = "❌ **Setup cancelled.**\n\nYou can use /start to configure your subscription."
+                    
+                    self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=msg_text,
                         parse_mode="Markdown"
                     )
                     return
@@ -200,24 +217,30 @@ class BotHandlers:
                 
                 if action == 'PB':
                     page = int(parts[1])
+                    chat_id = call.message.chat.id
+                    sub = self.storage.get_subscriber(chat_id)
+                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
                     msg_text = f"Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
-                        chat_id=call.message.chat.id,
+                        chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_bhavana_keyboard(page=page),
+                        reply_markup=self._build_bhavana_keyboard(page=page, show_cancel=is_existing),
                         parse_mode="Markdown"
                     )
 
                 elif action == 'B':
                     bhav_idx = int(parts[1])
                     bhav_name = BHAVANAS_LIST[bhav_idx]
+                    chat_id = call.message.chat.id
+                    sub = self.storage.get_subscriber(chat_id)
+                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
                     msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
-                        chat_id=call.message.chat.id,
+                        chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_dept_keyboard(bhav_idx, page=0),
+                        reply_markup=self._build_dept_keyboard(bhav_idx, page=0, show_cancel=is_existing),
                         parse_mode="Markdown"
                     )
 
@@ -225,12 +248,15 @@ class BotHandlers:
                     bhav_idx = int(parts[1])
                     page = int(parts[2])
                     bhav_name = BHAVANAS_LIST[bhav_idx]
+                    chat_id = call.message.chat.id
+                    sub = self.storage.get_subscriber(chat_id)
+                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
                     msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
-                        chat_id=call.message.chat.id,
+                        chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_dept_keyboard(bhav_idx, page=page),
+                        reply_markup=self._build_dept_keyboard(bhav_idx, page=page, show_cancel=is_existing),
                         parse_mode="Markdown"
                     )
 

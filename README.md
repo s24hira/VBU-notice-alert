@@ -91,7 +91,6 @@ Interact with the bot on Telegram using:
 - `/settings` - Reconfigure your subscription perfectly matching your needs.
 - `/status` - Check current bot status.
 - `/ping` - Confirm bot is online (responds with `Pong!`).
-- `/help` - View a list of all available commands.
 
 ---
 
