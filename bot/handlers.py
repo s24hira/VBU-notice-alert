@@ -112,7 +112,7 @@ class BotHandlers:
             sub = self.storage.get_subscriber(chat_id)
             if sub and sub.get('bhavana') and sub.get('department') and sub.get('name'):
                 msg_text = (
-                    f"👋 You are already subscribed to notice alerts!\n\n"
+                    f"👋 You are already subscribed to VBU notice alerts!\n\n"
                     f"**Current Configuration:**\n"
                     f"👤 **Name:** {sub['name']}\n"
                     f"🏛️ **Bhavana:** {sub['bhavana']}\n"
