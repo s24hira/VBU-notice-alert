@@ -134,6 +134,7 @@ class BotHandlers:
                 reply_markup=ForceReply(selective=True),
                 parse_mode="Markdown"
             )
+            self.bot.clear_step_handler_by_chat_id(chat_id)
             self.bot.register_next_step_handler(msg, self._save_name_first_handler)
 
         @self.bot.message_handler(commands=['settings'])

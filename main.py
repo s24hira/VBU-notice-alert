@@ -2,7 +2,6 @@ import os
 import random
 import logging
 import telebot
-import schedule
 import time
 from dotenv import load_dotenv
 import threading
@@ -53,32 +52,32 @@ class VBUNoticeBot:
             logger.error(f"Error resetting webhook: {e}")
 
     def run(self):
-        def scheduled_job():
-            try:
-                self.notice_processor.process_new_notices(self.bot)
-            except Exception as e:
-                logger.error(f"Error in scheduled job: {e}")
-            
-            next_interval = random.randint(1800, 2400)  # 30-40 minutes
-            schedule.clear('notice_check')
-            schedule.every(next_interval).seconds.do(scheduled_job).tag('notice_check')
-            logger.info(f"Next check scheduled in {next_interval} seconds")
-
         try:
             self.reset_webhook()
             
-            logger.info("Starting initial notice check")
-            scheduled_job()
-
             # Start Telegram bot polling in a separate thread
             polling_thread = threading.Thread(target=self.bot.polling, kwargs={'none_stop': True, 'timeout': 30, 'long_polling_timeout': 90})
             polling_thread.daemon = True
             polling_thread.start()
             logger.info("Bot polling started in separate thread")
-            logger.info("Starting main scheduler loop")
+            logger.info("Starting main loop")
+            
+            # Initial run
+            try:
+                logger.info("Starting initial notice check")
+                self.notice_processor.process_new_notices(self.bot)
+            except Exception as e:
+                logger.error(f"Error in initial notice check: {e}")
+
             while True:
-                schedule.run_pending()
-                time.sleep(1)
+                next_interval = random.randint(1800, 2400)  # 30-40 minutes
+                logger.info(f"Next check scheduled in {next_interval} seconds")
+                time.sleep(next_interval)
+                
+                try:
+                    self.notice_processor.process_new_notices(self.bot)
+                except Exception as e:
+                    logger.error(f"Error in scheduled job: {e}")
 
         except Exception as e:
             logger.error(f"Error in main loop: {e}")

@@ -15,12 +15,11 @@ class NoticeProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
-        self.session = requests.Session()
 
     def scrape_notices(self, max_retries=3):
         for attempt in range(max_retries):
             try:
-                response = self.session.get(self.website_url, timeout=30)
+                response = requests.get(self.website_url, timeout=30)
                 soup = BeautifulSoup(response.content, 'html.parser')
 
                 notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
@@ -76,7 +75,7 @@ class NoticeProcessor:
     def download_pdf_bytes(self, pdf_url, max_retries=3):
         for attempt in range(max_retries):
             try:
-                response = self.session.get(pdf_url, timeout=30)
+                response = requests.get(pdf_url, timeout=30)
                 if not response.headers.get('content-type', '').startswith('application/pdf'):
                     logger.error("Downloaded file is not a PDF")
                     return None
