@@ -3,6 +3,5 @@ pyTelegramBotAPI==4.34.0
 requests==2.34.2
 beautifulsoup4==4.15.0
 
-schedule==1.2.2
 python-dotenv==1.2.2
 supabase==2.31.0
