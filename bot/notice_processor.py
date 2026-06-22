@@ -19,8 +19,8 @@ class NoticeProcessor:
     def scrape_notices(self, max_retries=3):
         for attempt in range(max_retries):
             try:
-                response = requests.get(self.website_url, timeout=30)
-                soup = BeautifulSoup(response.content, 'html.parser')
+                with requests.get(self.website_url, timeout=30) as response:
+                    soup = BeautifulSoup(response.content, 'html.parser')
 
                 notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
                 if not notice_boxes:
@@ -61,7 +61,6 @@ class NoticeProcessor:
                 # Free memory
                 del notice_boxes
                 del soup
-                del response
 
                 return new_notices
 
@@ -75,16 +74,17 @@ class NoticeProcessor:
     def download_pdf_bytes(self, pdf_url, max_retries=3):
         for attempt in range(max_retries):
             try:
-                response = requests.get(pdf_url, timeout=30)
-                if not response.headers.get('content-type', '').startswith('application/pdf'):
-                    logger.error("Downloaded file is not a PDF")
-                    return None
+                with requests.get(pdf_url, timeout=30) as response:
+                    if not response.headers.get('content-type', '').startswith('application/pdf'):
+                        logger.error("Downloaded file is not a PDF")
+                        return None
 
-                if len(response.content) < 100:
-                    logger.error("Downloaded PDF file is too small")
-                    return None
+                    content = response.content
+                    if len(content) < 100:
+                        logger.error("Downloaded PDF file is too small")
+                        return None
 
-                return response.content
+                    return content
 
             except Exception as e:
                 logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {e}")

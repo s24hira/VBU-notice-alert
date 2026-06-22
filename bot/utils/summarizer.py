@@ -2,7 +2,7 @@ import os
 import base64
 import requests
 import json
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Literal
 import logging
 
@@ -81,6 +81,13 @@ class NoticeExtraction(BaseModel):
     target_department: Optional[DepartmentType] = Field(description="Targeted Department name if specified, otherwise null.")
     is_general: bool = Field(description="True if the notice applies to all students/general audience, False if it targets specific levels/bhavanas.")
 
+    @field_validator('target_bhavana', 'target_department', mode='before')
+    @classmethod
+    def cast_string_null_to_none(cls, v):
+        if isinstance(v, str) and v.lower() == 'null':
+            return None
+        return v
+
 class GeminiPDFSummarizer:
     def __init__(self, api_key):
         """
@@ -149,10 +156,10 @@ class GeminiPDFSummarizer:
         for attempt in range(max_retries):
             try:
                 logging.info(f"Generating summary and categorization from in-memory PDF content (attempt {attempt + 1}/{max_retries})...")
-                response = requests.post(self.url, headers={"Content-Type": "application/json"}, json=payload)
-                response.raise_for_status()
-                
-                response_data = response.json()
+                with requests.post(self.url, headers={"Content-Type": "application/json"}, json=payload) as response:
+                    response.raise_for_status()
+                    
+                    response_data = response.json()
                 text_result = response_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                 
                 if not text_result:

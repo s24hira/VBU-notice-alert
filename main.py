@@ -2,9 +2,13 @@ import os
 import random
 import logging
 import telebot
+from telebot import apihelper
 import time
 from dotenv import load_dotenv
 import threading
+
+# Prevent requests.Session memory bloat by recreating it every 5 minutes
+apihelper.SESSION_TIME_TO_LIVE = 5 * 60
 
 # Import modular components
 from bot.storage import SupabaseStorage
@@ -56,10 +60,10 @@ class VBUNoticeBot:
             self.reset_webhook()
             
             # Start Telegram bot polling in a separate thread
-            polling_thread = threading.Thread(target=self.bot.polling, kwargs={'none_stop': True, 'timeout': 30, 'long_polling_timeout': 90})
+            polling_thread = threading.Thread(target=self.bot.infinity_polling, kwargs={'timeout': 30, 'long_polling_timeout': 90})
             polling_thread.daemon = True
             polling_thread.start()
-            logger.info("Bot polling started in separate thread")
+            logger.info("Bot infinity_polling started in separate thread")
             logger.info("Starting main loop")
             
             # Initial run
