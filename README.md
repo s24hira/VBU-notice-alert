@@ -113,15 +113,3 @@ Interact with the bot on Telegram using:
 ├── Dockerfile                # Multi-stage lightweight Docker image
 └── docker-compose.yml        # Docker Compose configuration
 ```
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to fork the repository, make improvements, and submit pull requests. For bugs or feature requests, open an issue in the repository.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
