@@ -104,14 +104,16 @@ class GeminiPDFSummarizer:
         """
         import time
         prompt = """
-        Analyze the provided Visva-Bharati notice PDF.
+        Analyze the provided Visva-Bharati notice PDF. The core vision for categorization is: "Does it impact the student, and if yes, which category (Bhavana/Department) is it impacting?"
         Extract the following information:
         1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
         2. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
            - IMPORTANT: If a notice is issued by the central office but involves actions/interests specific to a particular Institute/Department's students, set target_bhavana to that specific Institute, NOT the Central Office.
         3. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
+           - IMPORTANT: For joining notices, you MUST identify and set the target_department (and target_bhavana if applicable) for which the employee is joining.
         4. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular institutes/departments.
            - IMPORTANT: If a notice is issued by the central office but involves actions/interests for ALL university students, MUST set is_general to true.
+           - IMPORTANT: For joining notices, DO NOT classify it as a general notice (is_general MUST be false), and ensure the specific department is identified.
         """
 
         schema = NoticeExtraction.model_json_schema()

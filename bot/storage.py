@@ -90,13 +90,12 @@ class SupabaseStorage:
             if notice_data.get('is_general', False):
                 return self.get_all_users()
 
-            target_bhavana = notice_data.get('target_bhavana')
+            target_bhavana = notice_data.get('target_bhavana') or "Central Administration / Office"
             target_department = notice_data.get('target_department')
 
             query = self.supabase.table('subscribers').select('telegram_chat_id')
 
-            if target_bhavana:
-                query = query.eq('bhavana', target_bhavana)
+            query = query.eq('bhavana', target_bhavana)
             if target_department:
                 query = query.in_('department', [target_department, 'All'])
 
@@ -125,7 +124,7 @@ class SupabaseStorage:
             new_notice = {
                 'title': notice_data.get('title'),
                 'link': notice_data.get('link'),
-                'target_bhavana': notice_data.get('target_bhavana'),
+                'target_bhavana': notice_data.get('target_bhavana') or "Central Administration / Office",
                 'target_department': notice_data.get('target_department'),
                 'is_general': notice_data.get('is_general', False),
                 'date': date_val,
