@@ -110,7 +110,7 @@ PDF Link: {notice['link']}
 
                 if summary_text:
                     summary_message = f"""
-📋 Notice Summary:
+📋 AI Summary:
 
 {summary_text}
                     """
