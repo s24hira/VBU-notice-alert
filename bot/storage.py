@@ -18,6 +18,16 @@ class SupabaseStorage:
 
         self.supabase: Client = create_client(self.supabase_url, self.supabase_key)
 
+    def reconnect(self):
+        """Recreate the Supabase client to flush accumulated httpx connection pool state.
+        
+        The supabase-py client uses httpx internally. Over many hours of operation,
+        the httpx connection pool accumulates SSL contexts and connection metadata.
+        Recreating the client releases all of that back to the garbage collector.
+        """
+        logger.info("Recreating Supabase client to flush connection pool state")
+        self.supabase = create_client(self.supabase_url, self.supabase_key)
+
     # User management
     def add_user(self, chat_id, username=None):
         # We might not know their selections yet, but we can insert them with defaults or leave them null.

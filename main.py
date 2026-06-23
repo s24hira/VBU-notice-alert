@@ -6,9 +6,41 @@ from telebot import apihelper
 import time
 from dotenv import load_dotenv
 import threading
+import gc
 
 # Prevent requests.Session memory bloat by recreating it every 5 minutes
 apihelper.SESSION_TIME_TO_LIVE = 5 * 60
+
+# --- glibc memory management (Linux/Docker only) ---
+# Python frees objects back to glibc's malloc, but glibc keeps the memory
+# in internal "arenas" rather than returning it to the OS.  malloc_trim(0)
+# forces glibc to scan those arenas and release free pages back to the OS.
+try:
+    import ctypes
+    _libc = ctypes.CDLL('libc.so.6')
+    _has_malloc_trim = True
+except (OSError, AttributeError):
+    _has_malloc_trim = False
+
+
+def release_memory():
+    """Force full garbage collection and return freed memory to the OS."""
+    gc.collect(generation=2)          # Sweep all three GC generations
+    if _has_malloc_trim:
+        _libc.malloc_trim(0)          # Release free glibc heap pages to OS
+
+
+def get_rss_mb():
+    """Read current RSS from /proc/self/status (Linux only). Returns -1 on failure."""
+    try:
+        with open('/proc/self/status') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    return round(int(line.split()[1]) / 1024, 1)  # KB → MB
+    except Exception:
+        pass
+    return -1
+
 
 # Import modular components
 from bot.storage import SupabaseStorage
@@ -45,6 +77,7 @@ class VBUNoticeBot:
         self.summarizer = GeminiPDFSummarizer(GEMINI_API_KEY)
         self.notice_processor = NoticeProcessor(self.summarizer, self.storage, VBU_WEBSITE_URL)
         self.handlers = BotHandlers(self.bot, self.storage)
+        self._check_count = 0
 
     def reset_webhook(self):
         """Reset any existing webhook to ensure clean polling"""
@@ -73,15 +106,30 @@ class VBUNoticeBot:
             except Exception as e:
                 logger.error(f"Error in initial notice check: {e}")
 
+            release_memory()
+            logger.info(f"Initial RSS after GC: {get_rss_mb()} MB")
+
             while True:
                 next_interval = random.randint(1800, 2400)  # 30-40 minutes
-                logger.info(f"Next check scheduled in {next_interval} seconds")
+                logger.info(f"Next check in {next_interval}s | RSS: {get_rss_mb()} MB")
                 time.sleep(next_interval)
                 
                 try:
                     self.notice_processor.process_new_notices(self.bot)
                 except Exception as e:
                     logger.error(f"Error in scheduled job: {e}")
+
+                self._check_count += 1
+
+                # Recycle the Supabase client every 6 cycles (~3 hours)
+                # to flush accumulated httpx connection pool / SSL state
+                if self._check_count % 6 == 0:
+                    logger.info("Recycling Supabase client connection pool")
+                    self.storage.reconnect()
+
+                # Force glibc to return freed memory to OS
+                release_memory()
+                logger.info(f"Post-GC RSS: {get_rss_mb()} MB")
 
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
@@ -103,4 +151,4 @@ def main():
     bot.run()
 
 if __name__ == '__main__':
-    main()
+    main()

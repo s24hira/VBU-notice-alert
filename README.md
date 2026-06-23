@@ -14,7 +14,7 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 - **Interactive UI:** Configure your subscription seamlessly using our 2-Step Telegram Inline Keyboard flow.
 - **Robust Storage:** Powered by **Supabase** (PostgreSQL) for resilient, structured tracking of subscribers and notices.
 - **Interactive Verification**: Includes an end-to-end `test_alert.py` testing script to instantly verify the scraper, Gemini API, and Telegram alerts.
-- **Memory Optimized Architecture:** Eliminates potential memory leaks through stateless HTTP querying (avoiding connection pool reuse leaks), a clean native polling loop (removing the `schedule` package and its recursive closure accumulation), and automatic cleanup of Telegram next-step handlers upon re-initialization.
+- **Memory Optimized Architecture:** Addresses glibc heap fragmentation in Docker via periodic `malloc_trim(0)` calls and tuned `MALLOC_MMAP_THRESHOLD_` / `MALLOC_TRIM_THRESHOLD_` environment variables, ensuring freed memory is returned to the OS. Also recycles the Supabase `httpx` connection pool every ~3 hours and uses stateless HTTP requests with strict context managers throughout.
 
 ---
 
