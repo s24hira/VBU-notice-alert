@@ -2,7 +2,7 @@ import os
 import base64
 import requests
 import json
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional, Literal
 import logging
 
@@ -12,6 +12,89 @@ from bot.constants import BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
 ALL_DEPARTMENTS = []
 for depts in BHAVANA_DEPARTMENTS_MAP.values():
     ALL_DEPARTMENTS.extend(depts)
+
+
+BHAVANA_ALIASES = {
+    "siksha bhavan": "Siksha Bhavana",
+    "siksha bhavana": "Siksha Bhavana",
+    "palli siksha bhavana": "Palli Siksha Bhavana",
+    "palli siksha bhavan": "Palli Siksha Bhavana",
+    "vidya bhavan": "Vidya Bhavana",
+    "vidya bhavana": "Vidya Bhavana",
+    "bhasha bhavan": "Bhasha Bhavana",
+    "bhasha bhavana": "Bhasha Bhavana",
+    "kala bhavan": "Kala Bhavana",
+    "kala bhavana": "Kala Bhavana",
+    "sangit bhavan": "Sangit Bhavana",
+    "sangit bhavana": "Sangit Bhavana",
+    "vinaya bhavan": "Vinaya Bhavana",
+    "vinaya bhavana": "Vinaya Bhavana",
+    "psv": "PSV",
+    "palli samgasa vibhaga": "PSV",
+    "palli samgathan vibhag": "PSV",
+    "schools & independent centres": "Schools & Independent Centres",
+    "central administration / office": "Central Administration / Office",
+    "central office": "Central Administration / Office"
+}
+
+DEPARTMENT_ALIASES = {
+    "horticulture": "Horticulture & Post-Harvest Technology",
+    "horticulture science": "Horticulture & Post-Harvest Technology",
+    "vegetable science": "Horticulture & Post-Harvest Technology",
+    "fruit science": "Horticulture & Post-Harvest Technology",
+    "computer science": "Computer & System Sciences",
+    "computer & system science": "Computer & System Sciences",
+    "computer and system sciences": "Computer & System Sciences",
+    "physics": "Physics",
+    "chemistry": "Chemistry",
+    "mathematics": "Mathematics",
+    "zoology": "Zoology",
+    "botany": "Botany",
+    "statistics": "Statistics",
+    "biotechnology": "Biotechnology",
+    "environmental studies": "Environmental Studies",
+    "iserc": "Integrated Science Education & Research Centre (ISERC)",
+    "integrated science education & research centre": "Integrated Science Education & Research Centre (ISERC)",
+    "economics": "Economics & Politics",
+    "politics": "Economics & Politics",
+    "economics & politics": "Economics & Politics",
+    "history": "History",
+    "aihca": "Ancient Indian History Culture & Archaeology (AIHCA)",
+    "ancient indian history culture & archaeology": "Ancient Indian History Culture & Archaeology (AIHCA)",
+    "anthropology": "Anthropology",
+    "geography": "Geography",
+    "philosophy": "Philosophy & Comparative Religion",
+    "philosophy & comparative religion": "Philosophy & Comparative Religion",
+    "cjmc": "Centre for Journalism & Mass Communication (CJMC)",
+    "journalism": "Centre for Journalism & Mass Communication (CJMC)",
+    "women's studies": "Centre for Women's Studies",
+    "budhist studies": "Centre for Buddhist Studies",
+    "bengali": "Bengali",
+    "english": "English",
+    "hindi": "Hindi",
+    "sanskrit": "Sanskrit Pali & Prakrit",
+    "odia": "Odia",
+    "marathi": "Marathi",
+    "santali": "Santali",
+    "assamese": "Assamese",
+    "tamil": "Tamil",
+    "chinese": "Chinese Language & Culture",
+    "japanese": "Japanese",
+    "education": "Education",
+    "physical education": "Physical Education & Sport Science",
+    "yogic art": "Yogic Art & Science",
+    "social work": "Social Work",
+    "lifelong learning": "Lifelong Learning & Extension (REC)",
+    "rec": "Lifelong Learning & Extension (REC)",
+    "rural studies": "Rural Studies (Palli Charcha Kendra / PCK)",
+    "palli charcha kendra": "Rural Studies (Palli Charcha Kendra / PCK)",
+    "silpa sadana": "Silpa-Sadana",
+    "silpa-sadana": "Silpa-Sadana",
+    "patha bhavana": "Patha Bhavana",
+    "siksha satra": "Siksha Satra",
+    "rabindra bhavana": "Rabindra Bhavana"
+}
+
 
 
 BhavanaType = Literal[
@@ -81,12 +164,59 @@ class NoticeExtraction(BaseModel):
     target_department: Optional[DepartmentType] = Field(description="Targeted Department name if specified, otherwise null.")
     is_general: bool = Field(description="True if the notice applies to all students/general audience, False if it targets specific levels/bhavanas.")
 
-    @field_validator('target_bhavana', 'target_department', mode='before')
+    @field_validator('target_bhavana', mode='before')
     @classmethod
-    def cast_string_null_to_none(cls, v):
-        if isinstance(v, str) and v.lower() == 'null':
+    def validate_bhavana(cls, v):
+        if not v or (isinstance(v, str) and v.lower() == 'null'):
             return None
-        return v
+        if not isinstance(v, str):
+            return None
+        
+        v_clean = v.strip()
+        v_lower = v_clean.lower()
+        
+        if v_lower in BHAVANA_ALIASES:
+            return BHAVANA_ALIASES[v_lower]
+            
+        for b in BHAVANAS_LIST:
+            if b.lower() == v_lower:
+                return b
+                
+        logging.warning(f"Unrecognized Bhavana '{v}' from Gemini. Falling back to None.")
+        return None
+
+    @field_validator('target_department', mode='before')
+    @classmethod
+    def validate_department(cls, v):
+        if not v or (isinstance(v, str) and v.lower() == 'null'):
+            return None
+        if not isinstance(v, str):
+            return None
+            
+        v_clean = v.strip()
+        v_lower = v_clean.lower()
+        
+        if v_lower in DEPARTMENT_ALIASES:
+            return DEPARTMENT_ALIASES[v_lower]
+            
+        for d in ALL_DEPARTMENTS:
+            if d.lower() == v_lower:
+                return d
+                
+        logging.warning(f"Unrecognized Department '{v}' from Gemini. Falling back to None.")
+        return None
+
+    @model_validator(mode='after')
+    def infer_bhavana_from_department(self):
+        if self.target_department:
+            # Find which Bhavana this department belongs to
+            for bhavana, depts in BHAVANA_DEPARTMENTS_MAP.items():
+                if self.target_department in depts:
+                    if self.target_bhavana != bhavana:
+                        logging.info(f"Overriding target_bhavana to '{bhavana}' based on target_department '{self.target_department}' (was '{self.target_bhavana}')")
+                        self.target_bhavana = bhavana
+                    break
+        return self
 
 class GeminiPDFSummarizer:
     def __init__(self, api_key):
@@ -117,7 +247,7 @@ class GeminiPDFSummarizer:
         """
 
         schema = NoticeExtraction.model_json_schema()
-        # Ensure proper schema formatting for Gemini API
+        # Ensure proper schema formatting for Gemini API (passing enums and nullable attributes)
         gemini_schema = {
             "type": "OBJECT",
             "properties": {},
@@ -125,12 +255,25 @@ class GeminiPDFSummarizer:
         }
         for prop_name, prop_details in schema.get("properties", {}).items():
             prop_type = prop_details.get("type", "STRING").upper()
-            if prop_type == "NULL":
-                prop_type = "STRING" # Fallback if pydantic gives something strange
-            gemini_schema["properties"][prop_name] = {
+            prop_schema = {
                 "type": prop_type,
                 "description": prop_details.get("description", "")
             }
+            
+            # Handle Pydantic v2 Union/Optional types which generate 'anyOf'
+            if "anyOf" in prop_details:
+                for sub_schema in prop_details["anyOf"]:
+                    sub_type = sub_schema.get("type")
+                    if sub_type and sub_type != "null":
+                        prop_schema["type"] = sub_type.upper()
+                        if "enum" in sub_schema:
+                            prop_schema["enum"] = sub_schema["enum"]
+                        break
+                prop_schema["nullable"] = True
+            elif "enum" in prop_details:
+                prop_schema["enum"] = prop_details["enum"]
+                
+            gemini_schema["properties"][prop_name] = prop_schema
             
         b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
         payload = {

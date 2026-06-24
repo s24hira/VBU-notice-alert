@@ -6,6 +6,7 @@ import telebot
 
 from bot.storage import SupabaseStorage
 from bot.notice_processor import NoticeProcessor
+from bot.result_processor import ResultProcessor
 from bot.utils.summarizer import GeminiPDFSummarizer
 
 # Configure logging
@@ -76,18 +77,56 @@ def test_scraping_and_summarizer(storage, gemini_key, vbu_url):
     except Exception as e:
         logger.error(f"FAILURE: Scraping/Summarizer test encountered error: {e}")
 
+def test_result_scraping_and_summarizer(storage, gemini_key, samarth_url):
+    logger.info("--- Testing Samarth Result Scraping and Summarizer ---")
+    if not gemini_key:
+        logger.error("FAILURE: GEMINI_API_KEY environment variable not set.")
+        return
+    try:
+        summarizer = GeminiPDFSummarizer(gemini_key)
+        processor = ResultProcessor(summarizer, storage, samarth_url)
+        
+        logger.info(f"Scraping results from: {samarth_url} ...")
+        results = processor.scrape_results()
+        logger.info(f"SUCCESS: Scraped {len(results)} new results.")
+        for idx, result in enumerate(results[:3]):
+            logger.info(f"  [{idx+1}] Title: {result['title']}")
+            logger.info(f"      Link: {result['link']}")
+            logger.info(f"      Date: {result['date']}")
+        
+        if results:
+            target_result = results[0]
+            logger.info(f"Downloading sample result PDF from: {target_result['link']} ...")
+            pdf_bytes = processor.download_pdf_bytes(target_result['link'])
+            if pdf_bytes:
+                logger.info(f"SUCCESS: PDF downloaded in memory ({len(pdf_bytes)} bytes)")
+                logger.info("Summarizing result PDF with Gemini...")
+                extraction = summarizer.summarize_pdf(pdf_bytes)
+                logger.info(f"SUCCESS: Summary generated:\n{extraction.summary}")
+                logger.info(f"  Institute: {extraction.target_bhavana}")
+                logger.info(f"  Dept: {extraction.target_department}")
+                logger.info(f"  General: {extraction.is_general}")
+            else:
+                logger.error("FAILURE: PDF download failed.")
+        else:
+            logger.warning("No results found to test PDF download.")
+    except Exception as e:
+        logger.error(f"FAILURE: Result Scraping/Summarizer test encountered error: {e}")
+
 def main():
     load_dotenv()
     
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     gemini_key = os.getenv('GEMINI_API_KEY')
     vbu_url = os.getenv('VBU_WEBSITE_URL', 'https://www.visvabharati.ac.in/home/all-notices/')
+    samarth_url = os.getenv('SAMARTH_RESULTS_URL', 'https://visvabharati.samarth.edu.in/index.php/notifications/index')
     
     bot = test_telegram_bot(token)
     storage = test_supabase_storage()
     
     if storage:
         test_scraping_and_summarizer(storage, gemini_key, vbu_url)
+        test_result_scraping_and_summarizer(storage, gemini_key, samarth_url)
 
 if __name__ == '__main__':
     main()

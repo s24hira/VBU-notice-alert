@@ -46,6 +46,7 @@ def get_rss_mb():
 from bot.storage import SupabaseStorage
 from bot.handlers import BotHandlers
 from bot.notice_processor import NoticeProcessor
+from bot.result_processor import ResultProcessor
 from bot.utils.summarizer import GeminiPDFSummarizer
 
 # Configure logging
@@ -65,6 +66,7 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 VBU_WEBSITE_URL = os.getenv('VBU_WEBSITE_URL', 'https://www.visvabharati.ac.in/home/all-notices/')
+SAMARTH_RESULTS_URL = os.getenv('SAMARTH_RESULTS_URL', 'https://visvabharati.samarth.edu.in/index.php/notifications/index')
 
 # Ensure data directory exists
 os.makedirs('data', exist_ok=True)
@@ -76,6 +78,7 @@ class VBUNoticeBot:
         self.storage = SupabaseStorage()
         self.summarizer = GeminiPDFSummarizer(GEMINI_API_KEY)
         self.notice_processor = NoticeProcessor(self.summarizer, self.storage, VBU_WEBSITE_URL)
+        self.result_processor = ResultProcessor(self.summarizer, self.storage, SAMARTH_RESULTS_URL)
         self.handlers = BotHandlers(self.bot, self.storage)
         self._check_count = 0
 
@@ -101,10 +104,11 @@ class VBUNoticeBot:
             
             # Initial run
             try:
-                logger.info("Starting initial notice check")
+                logger.info("Starting initial notice and result check")
                 self.notice_processor.process_new_notices(self.bot)
+                self.result_processor.process_new_results(self.bot)
             except Exception as e:
-                logger.error(f"Error in initial notice check: {e}")
+                logger.error(f"Error in initial check: {e}")
 
             release_memory()
             logger.info(f"Initial RSS after GC: {get_rss_mb()} MB")
@@ -116,6 +120,7 @@ class VBUNoticeBot:
                 
                 try:
                     self.notice_processor.process_new_notices(self.bot)
+                    self.result_processor.process_new_results(self.bot)
                 except Exception as e:
                     logger.error(f"Error in scheduled job: {e}")
 
