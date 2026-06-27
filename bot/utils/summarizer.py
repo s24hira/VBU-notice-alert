@@ -32,6 +32,7 @@ BHAVANA_ALIASES = {
     "psv": "PSV",
     "palli samgasa vibhaga": "PSV",
     "palli samgathan vibhag": "PSV",
+    "palli samgathana vibhaga": "PSV",
     "schools & independent centres": "Schools & Independent Centres",
     "central administration / office": "Central Administration / Office",
     "central office": "Central Administration / Office"
@@ -85,6 +86,7 @@ DEPARTMENT_ALIASES = {
     "yogic art": "Yogic Art & Science",
     "social work": "Social Work",
     "lifelong learning": "Lifelong Learning & Extension (REC)",
+    "lifelong learning & extension": "Lifelong Learning & Extension (REC)",
     "rec": "Lifelong Learning & Extension (REC)",
     "rural studies": "Rural Studies (Palli Charcha Kendra / PCK)",
     "palli charcha kendra": "Rural Studies (Palli Charcha Kendra / PCK)",
@@ -227,7 +229,7 @@ class GeminiPDFSummarizer:
         self.model = 'gemini-3.1-flash-lite'
         self.url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
 
-    def summarize_pdf(self, pdf_bytes, max_retries=3, backoff_factor=5) -> NoticeExtraction:
+    def summarize_pdf(self, pdf_bytes, max_retries=5, backoff_factor=5) -> NoticeExtraction:
         """
         Summarize a PDF and extract target audience parameters.
         Returns a NoticeExtraction pydantic object.
