@@ -5,6 +5,7 @@ import datetime
 from bs4 import BeautifulSoup
 import time
 from urllib.parse import urlparse
+import certifi
 
 from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError, NoticeExtraction
 from bot.storage import SupabaseStorage
