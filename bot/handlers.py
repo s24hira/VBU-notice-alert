@@ -4,6 +4,8 @@ import logging
 import time
 from functools import wraps
 
+import re
+from collections import defaultdict
 from bot.constants import BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
 
 logger = logging.getLogger(__name__)
@@ -14,12 +16,26 @@ class BotHandlers:
     def __init__(self, bot, storage):
         self.bot = bot
         self.storage = storage
+        self._rate_limit = defaultdict(list)
         self.setup_commands()
+
+    def _is_rate_limited(self, chat_id, max_calls=5, window_seconds=60):
+        now = time.time()
+        timestamps = self._rate_limit[chat_id]
+        # Purge old entries
+        self._rate_limit[chat_id] = [t for t in timestamps if now - t < window_seconds]
+        if len(self._rate_limit[chat_id]) >= max_calls:
+            return True
+        self._rate_limit[chat_id].append(now)
+        return False
 
     def ensure_user(self, func):
         @wraps(func)
         def wrapper(message):
             user_id = message.chat.id
+            if self._is_rate_limited(user_id):
+                logger.warning(f"User {user_id} rate limited.")
+                return
             username = message.from_user.username
             if self.storage.add_user(user_id, username):
                 logger.info(f"New user {user_id} added from {func.__name__}.")
@@ -91,6 +107,18 @@ class BotHandlers:
 
         if name.startswith('/'):
             self.bot.send_message(chat_id, "❌ Setup cancelled. You can type /start to try again.")
+            return
+
+        if len(name) > 100:
+            msg = self.bot.send_message(chat_id, "❌ Name is too long (max 100 characters). Please try again:", reply_markup=ForceReply(selective=True))
+            self.bot.register_next_step_handler(msg, self._save_name_first_handler)
+            return
+
+        # Sanitize for Telegram Markdown
+        name = re.sub(r'[*_`\[\]()~>#+\-=|{}.!]', '', name).strip()
+        if not name:
+            msg = self.bot.send_message(chat_id, "❌ Name contains only special characters. Please enter a valid name:", reply_markup=ForceReply(selective=True))
+            self.bot.register_next_step_handler(msg, self._save_name_first_handler)
             return
 
         # Save name in the database first
@@ -232,6 +260,9 @@ class BotHandlers:
 
                 elif action == 'B':
                     bhav_idx = int(parts[1])
+                    if not (0 <= bhav_idx < len(BHAVANAS_LIST)):
+                        logger.warning(f"Invalid bhavana index {bhav_idx} from user {call.message.chat.id}")
+                        return
                     bhav_name = BHAVANAS_LIST[bhav_idx]
                     chat_id = call.message.chat.id
                     sub = self.storage.get_subscriber(chat_id)
@@ -247,6 +278,9 @@ class BotHandlers:
 
                 elif action == 'PD':
                     bhav_idx = int(parts[1])
+                    if not (0 <= bhav_idx < len(BHAVANAS_LIST)):
+                        logger.warning(f"Invalid bhavana index {bhav_idx} from user {call.message.chat.id}")
+                        return
                     page = int(parts[2])
                     bhav_name = BHAVANAS_LIST[bhav_idx]
                     chat_id = call.message.chat.id
@@ -265,11 +299,20 @@ class BotHandlers:
                     bhav_idx = int(parts[1])
                     dept_idx = int(parts[2])
                     
+                    if not (0 <= bhav_idx < len(BHAVANAS_LIST)):
+                        logger.warning(f"Invalid bhavana index {bhav_idx} from user {call.message.chat.id}")
+                        return
+                    
                     bhav_name = BHAVANAS_LIST[bhav_idx]
+                    depts = BHAVANA_DEPARTMENTS_MAP.get(bhav_name, [])
+                    if dept_idx != -1 and not (0 <= dept_idx < len(depts)):
+                        logger.warning(f"Invalid department index {dept_idx} from user {call.message.chat.id}")
+                        return
+
                     if dept_idx == -1:
                         dept_name = "All"
                     else:
-                        dept_name = BHAVANA_DEPARTMENTS_MAP[bhav_name][dept_idx]
+                        dept_name = depts[dept_idx]
                     
                     chat_id = call.message.chat.id
                     sub = self.storage.get_subscriber(chat_id)

@@ -108,13 +108,15 @@ class SupabaseStorage:
     # Notice management
     def add_notice(self, notice_data):
         try:
-            # Check if notice already exists
-            response = self.supabase.table('notices').select('id').or_(
-                f"title.eq.\"{notice_data.get('title')}\",link.eq.\"{notice_data.get('link')}\""
-            ).execute()
+            title = notice_data.get('title', '')
+            link = notice_data.get('link', '')
+
+            # Check if notice already exists by title or link
+            by_title = self.supabase.table('notices').select('id').eq('title', title).execute()
+            by_link = self.supabase.table('notices').select('id').eq('link', link).execute()
             
-            if response.data:
-                logger.info(f"Notice '{notice_data.get('title')}' already exists. Skipping.")
+            if by_title.data or by_link.data:
+                logger.info(f"Notice '{title}' already exists. Skipping.")
                 return None
 
             date_val = notice_data.get('date')

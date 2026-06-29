@@ -4,6 +4,7 @@ import requests
 import datetime
 from bs4 import BeautifulSoup
 import time
+from urllib.parse import urlparse
 
 from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError, NoticeExtraction
 from bot.storage import SupabaseStorage
@@ -15,6 +16,20 @@ class NoticeProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
+        self.MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
+        self.ALLOWED_DOMAINS = [
+            'visvabharati.ac.in',
+            'visvabharati.samarth.edu.in',
+        ]
+
+    def _is_safe_url(self, url):
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ('http', 'https'):
+                return False
+            return any(parsed.hostname and parsed.hostname.endswith(domain) for domain in self.ALLOWED_DOMAINS)
+        except Exception:
+            return False
 
     def scrape_notices(self, max_retries=3):
         for attempt in range(max_retries):
@@ -72,14 +87,32 @@ class NoticeProcessor:
         return []
 
     def download_pdf_bytes(self, pdf_url, max_retries=3):
+        if not self._is_safe_url(pdf_url):
+            logger.error(f"Unsafe or unauthorized URL requested: {pdf_url}")
+            return None
+
         for attempt in range(max_retries):
             try:
-                with requests.get(pdf_url, timeout=30) as response:
+                with requests.get(pdf_url, timeout=30, stream=True) as response:
+                    content_length = int(response.headers.get('content-length', 0))
+                    if content_length > self.MAX_PDF_SIZE:
+                        logger.error(f"PDF too large: {content_length} bytes")
+                        return None
+
                     if not response.headers.get('content-type', '').startswith('application/pdf'):
                         logger.error("Downloaded file is not a PDF")
                         return None
 
-                    content = response.content
+                    chunks = []
+                    downloaded = 0
+                    for chunk in response.iter_content(chunk_size=8192):
+                        downloaded += len(chunk)
+                        if downloaded > self.MAX_PDF_SIZE:
+                            logger.error("PDF exceeds size limit during download")
+                            return None
+                        chunks.append(chunk)
+
+                    content = b''.join(chunks)
                     if len(content) < 100:
                         logger.error("Downloaded PDF file is too small")
                         return None

@@ -30,8 +30,5 @@ USER appuser
 ENV MALLOC_TRIM_THRESHOLD_=65536
 ENV MALLOC_MMAP_THRESHOLD_=131072
 
-# Expose the port for the health check server
-EXPOSE 8001
-
 # Run main.py when the container launches
 CMD ["python", "main.py"]

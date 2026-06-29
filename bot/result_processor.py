@@ -4,6 +4,7 @@ import requests
 import datetime
 from bs4 import BeautifulSoup
 import time
+from urllib.parse import urlparse
 
 from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError, NoticeExtraction
 from bot.storage import SupabaseStorage
@@ -15,15 +16,27 @@ class ResultProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
+        self.MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
+        self.ALLOWED_DOMAINS = [
+            'visvabharati.ac.in',
+            'visvabharati.samarth.edu.in',
+        ]
+
+    def _is_safe_url(self, url):
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ('http', 'https'):
+                return False
+            return any(parsed.hostname and parsed.hostname.endswith(domain) for domain in self.ALLOWED_DOMAINS)
+        except Exception:
+            return False
         
-        # Suppress insecure request warnings if fetching samarth without verify
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        import certifi
 
     def scrape_results(self, max_retries=3):
         for attempt in range(max_retries):
             try:
-                with requests.get(self.website_url, timeout=30, verify=False) as response:
+                with requests.get(self.website_url, timeout=30, verify=certifi.where()) as response:
                     soup = BeautifulSoup(response.content, 'html.parser')
 
                 tables = soup.find_all('table')
@@ -95,17 +108,40 @@ class ResultProcessor:
         return []
 
     def download_pdf_bytes(self, pdf_url, max_retries=3):
+        if not self._is_safe_url(pdf_url):
+            logger.error(f"Unsafe or unauthorized URL requested: {pdf_url}")
+            return None
+
         for attempt in range(max_retries):
             try:
-                # Some samarth links might need verify=False
-                with requests.get(pdf_url, timeout=30, verify=False) as response:
+                with requests.get(pdf_url, timeout=30, verify=certifi.where(), stream=True) as response:
+                    content_length = int(response.headers.get('content-length', 0))
+                    if content_length > self.MAX_PDF_SIZE:
+                        logger.error(f"PDF too large: {content_length} bytes")
+                        return None
+
                     if not response.headers.get('content-type', '').startswith('application/pdf'):
                         # S3 might return binary/octet-stream sometimes, so we check content
-                        if b'%PDF-' not in response.content[:50]:
-                            logger.error("Downloaded file does not appear to be a PDF")
-                            return None
+                        # Since it's streaming, we need to read the first chunk to check
+                        pass # Moved check below after reading first chunk
 
-                    content = response.content
+                    chunks = []
+                    downloaded = 0
+                    first_chunk = True
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if first_chunk:
+                            if not response.headers.get('content-type', '').startswith('application/pdf') and b'%PDF-' not in chunk[:50]:
+                                logger.error("Downloaded file does not appear to be a PDF")
+                                return None
+                            first_chunk = False
+
+                        downloaded += len(chunk)
+                        if downloaded > self.MAX_PDF_SIZE:
+                            logger.error("PDF exceeds size limit during download")
+                            return None
+                        chunks.append(chunk)
+
+                    content = b''.join(chunks)
                     if len(content) < 100:
                         logger.error("Downloaded PDF file is too small")
                         return None

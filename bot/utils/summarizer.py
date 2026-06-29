@@ -227,7 +227,11 @@ class GeminiPDFSummarizer:
         """
         self.api_key = api_key
         self.model = 'gemini-3.1-flash-lite'
-        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        self._headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self.api_key
+        }
 
     def summarize_pdf(self, pdf_bytes, max_retries=5, backoff_factor=5) -> NoticeExtraction:
         """
@@ -303,7 +307,7 @@ class GeminiPDFSummarizer:
         for attempt in range(max_retries):
             try:
                 logging.info(f"Generating summary and categorization from in-memory PDF content (attempt {attempt + 1}/{max_retries})...")
-                with requests.post(self.url, headers={"Content-Type": "application/json"}, json=payload) as response:
+                with requests.post(self.url, headers=self._headers, json=payload) as response:
                     response.raise_for_status()
                     
                     response_data = response.json()
