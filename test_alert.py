@@ -95,21 +95,9 @@ def test_result_scraping_and_summarizer(storage, gemini_key, samarth_url):
             logger.info(f"      Date: {result['date']}")
         
         if results:
-            target_result = results[0]
-            logger.info(f"Downloading sample result PDF from: {target_result['link']} ...")
-            pdf_bytes = processor.download_pdf_bytes(target_result['link'])
-            if pdf_bytes:
-                logger.info(f"SUCCESS: PDF downloaded in memory ({len(pdf_bytes)} bytes)")
-                logger.info("Summarizing result PDF with Gemini...")
-                extraction = summarizer.summarize_pdf(pdf_bytes)
-                logger.info(f"SUCCESS: Summary generated:\n{extraction.summary}")
-                logger.info(f"  Institute: {extraction.target_bhavana}")
-                logger.info(f"  Dept: {extraction.target_department}")
-                logger.info(f"  General: {extraction.is_general}")
-            else:
-                logger.error("FAILURE: PDF download failed.")
+            logger.info("SUCCESS: Results scraped successfully. Skipping PDF download and summary generation as per new requirements.")
         else:
-            logger.warning("No results found to test PDF download.")
+            logger.warning("No results found.")
     except Exception as e:
         logger.error(f"FAILURE: Result Scraping/Summarizer test encountered error: {e}")
 

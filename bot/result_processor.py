@@ -155,34 +155,15 @@ PDF Link: {result['link']}
             for result in new_results:
                 try:
                     logger.info(f"Processing result: {result['title']}")
-                    pdf_bytes = self.download_pdf_bytes(result['link'])
-                    if not pdf_bytes:
-                        continue
-
-                    logger.info("Generating summary using Gemini")
-                    try:
-                        extraction = self.summarizer.summarize_pdf(pdf_bytes)
-                    except SummarizationError as e:
-                        logger.error(f"Summarization failed: {e}")
-                        logger.warning(f"Strict requirement not met: Skipping result '{result['title']}' due to summarization failure.")
-                        continue
-                    
-                    if not extraction or not extraction.summary:
-                        logger.error("Strict requirement not met: Extraction yielded empty summary.")
-                        logger.warning(f"Skipping result '{result['title']}'.")
-                        continue
-
-                    # Sleep to respect the Gemini API free tier rate limit
-                    time.sleep(5)
 
                     result_data = {
                         'title': result['title'],
                         'link': result['link'],
                         'date': result['date'],
-                        'summary': extraction.summary,
-                        'target_bhavana': extraction.target_bhavana,
-                        'target_department': extraction.target_department,
-                        'is_general': extraction.is_general,
+                        'summary': '',
+                        'target_bhavana': None,
+                        'target_department': None,
+                        'is_general': True,
                         'status': 'New'
                     }
 
@@ -202,12 +183,6 @@ PDF Link: {result['link']}
 
                 except Exception as e:
                     logger.error(f"Result processing error: {e}")
-                finally:
-                    # Clear memory for each result processed
-                    if 'pdf_bytes' in locals():
-                        del pdf_bytes
-                    if 'extraction' in locals():
-                        del extraction
 
         except Exception as e:
             logger.error(f"Error in process_new_results: {e}")
