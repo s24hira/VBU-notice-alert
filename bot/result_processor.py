@@ -21,6 +21,7 @@ class ResultProcessor:
         self.ALLOWED_DOMAINS = [
             'visvabharati.ac.in',
             'visvabharati.samarth.edu.in',
+            'amazonaws.com',
         ]
 
     def _is_safe_url(self, url):
