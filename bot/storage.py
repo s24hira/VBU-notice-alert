@@ -45,7 +45,7 @@ class SupabaseStorage:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Error adding user {chat_id} to Supabase: {e}")
+            logger.error(f"Error adding user {chat_id} to Supabase: {type(e).__name__}")
             return False
 
     def upsert_subscriber(self, chat_id, bhavana, department, name=None):
@@ -62,7 +62,7 @@ class SupabaseStorage:
             logger.info(f"Subscriber {chat_id} upserted with selections: {bhavana}, {department}, name: {name}.")
             return True
         except Exception as e:
-            logger.error(f"Error upserting subscriber {chat_id}: {e}")
+            logger.error(f"Error upserting subscriber {chat_id}: {type(e).__name__}")
             return False
 
     def get_subscriber(self, chat_id):
@@ -72,7 +72,7 @@ class SupabaseStorage:
                 return response.data[0]
             return None
         except Exception as e:
-            logger.error(f"Error fetching subscriber {chat_id}: {e}")
+            logger.error(f"Error fetching subscriber {chat_id}: {type(e).__name__}")
             return None
 
     def get_all_users(self):
@@ -81,7 +81,7 @@ class SupabaseStorage:
             response = self.supabase.table('subscribers').select('telegram_chat_id').execute()
             return [user['telegram_chat_id'] for user in response.data]
         except Exception as e:
-            logger.error(f"Error getting all users: {e}")
+            logger.error(f"Error getting all users: {type(e).__name__}")
             return []
 
     def get_matching_subscribers(self, notice_data):
@@ -102,7 +102,7 @@ class SupabaseStorage:
             response = query.execute()
             return [user['telegram_chat_id'] for user in response.data]
         except Exception as e:
-            logger.error(f"Error fetching matching subscribers: {e}")
+            logger.error(f"Error fetching matching subscribers: {type(e).__name__}")
             return self.get_all_users() # Fallback to all if filtering fails
 
     # Notice management
@@ -140,7 +140,7 @@ class SupabaseStorage:
                 return res.data[0]
             return None
         except Exception as e:
-            logger.error(f"Failed to add notice '{notice_data.get('title')}': {e}")
+            logger.error(f"Failed to add notice '{notice_data.get('title')}': {type(e).__name__}")
             return None
 
     def get_all_notice_urls(self):
@@ -148,7 +148,7 @@ class SupabaseStorage:
             response = self.supabase.table('notices').select('link').execute()
             return {notice['link'] for notice in response.data}
         except Exception as e:
-            logger.error(f"Error fetching notice URLs: {e}")
+            logger.error(f"Error fetching notice URLs: {type(e).__name__}")
             return set()
 
     def update_notice_status(self, record_id, status):
@@ -159,5 +159,5 @@ class SupabaseStorage:
                 return True
             return False
         except Exception as e:
-            logger.error(f"Failed to update notice {record_id} status: {e}")
+            logger.error(f"Failed to update notice {record_id} status: {type(e).__name__}")
             return False

@@ -27,7 +27,7 @@ def test_telegram_bot(token):
         logger.info(f"SUCCESS: Bot connection verified. Username: @{me.username}, ID: {me.id}")
         return bot
     except Exception as e:
-        logger.error(f"FAILURE: Telegram Bot verification failed: {e}")
+        logger.error(f"FAILURE: Telegram Bot verification failed: {type(e).__name__}")
         return None
 
 def test_supabase_storage():
@@ -39,7 +39,7 @@ def test_supabase_storage():
         logger.info(f"SUCCESS: Successfully fetched from Supabase. Users count: {len(users)}, Notices count: {len(urls)}")
         return storage
     except Exception as e:
-        logger.error(f"FAILURE: Supabase Storage check failed: {e}")
+        logger.error(f"FAILURE: Supabase Storage check failed: {type(e).__name__}")
         return None
 
 def test_scraping_and_summarizer(storage, gemini_key, vbu_url):
@@ -75,7 +75,7 @@ def test_scraping_and_summarizer(storage, gemini_key, vbu_url):
         else:
             logger.error("FAILURE: PDF download failed.")
     except Exception as e:
-        logger.error(f"FAILURE: Scraping/Summarizer test encountered error: {e}")
+        logger.error(f"FAILURE: Scraping/Summarizer test encountered error: {type(e).__name__}")
 
 def test_result_scraping_and_summarizer(storage, gemini_key, samarth_url):
     logger.info("--- Testing Samarth Result Scraping and Summarizer ---")
@@ -99,7 +99,7 @@ def test_result_scraping_and_summarizer(storage, gemini_key, samarth_url):
         else:
             logger.warning("No results found.")
     except Exception as e:
-        logger.error(f"FAILURE: Result Scraping/Summarizer test encountered error: {e}")
+        logger.error(f"FAILURE: Result Scraping/Summarizer test encountered error: {type(e).__name__}")
 
 def main():
     load_dotenv()

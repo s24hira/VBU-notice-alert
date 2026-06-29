@@ -17,6 +17,8 @@ apihelper.SESSION_TIME_TO_LIVE = 5 * 60
 # forces glibc to scan those arenas and release free pages back to the OS.
 try:
     import ctypes
+    # SECURITY NOTE: This assumes a trusted container environment.
+    # libc.so.6 is loaded for malloc_trim() memory optimization.
     _libc = ctypes.CDLL('libc.so.6')
     _has_malloc_trim = True
 except (OSError, AttributeError):
@@ -89,7 +91,7 @@ class VBUNoticeBot:
             time.sleep(0.5)  # Wait for webhook deletion to complete
             logger.info("Webhook reset successful")
         except Exception as e:
-            logger.error(f"Error resetting webhook: {e}")
+            logger.error(f"Error resetting webhook: {type(e).__name__}")
 
     def run(self):
         try:
@@ -108,7 +110,7 @@ class VBUNoticeBot:
                 self.notice_processor.process_new_notices(self.bot)
                 self.result_processor.process_new_results(self.bot)
             except Exception as e:
-                logger.error(f"Error in initial check: {e}")
+                logger.error(f"Error in initial check: {type(e).__name__}")
 
             release_memory()
             logger.info(f"Initial RSS after GC: {get_rss_mb()} MB")
@@ -122,7 +124,7 @@ class VBUNoticeBot:
                     self.notice_processor.process_new_notices(self.bot)
                     self.result_processor.process_new_results(self.bot)
                 except Exception as e:
-                    logger.error(f"Error in scheduled job: {e}")
+                    logger.error(f"Error in scheduled job: {type(e).__name__}")
 
                 self._check_count += 1
 
@@ -137,7 +139,7 @@ class VBUNoticeBot:
                 logger.info(f"Post-GC RSS: {get_rss_mb()} MB")
 
         except Exception as e:
-            logger.error(f"Error in main loop: {e}")
+            logger.error(f"Error in main loop: {type(e).__name__}")
             raise
 
 def main():
@@ -156,4 +158,4 @@ def main():
     bot.run()
 
 if __name__ == '__main__':
-    main()
+    main()

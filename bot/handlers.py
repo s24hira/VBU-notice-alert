@@ -346,4 +346,4 @@ class BotHandlers:
                     )
 
             except Exception as e:
-                logger.error(f"Callback query error: {e}")
+                logger.error(f"Callback query error: {type(e).__name__}")

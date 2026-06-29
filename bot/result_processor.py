@@ -103,7 +103,7 @@ class ResultProcessor:
                 return new_results
 
             except Exception as e:
-                logger.error(f"Error scraping results (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(f"Error scraping results (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
                 if attempt < max_retries - 1:
                     time.sleep(5)
                 
@@ -151,7 +151,7 @@ class ResultProcessor:
                     return content
 
             except Exception as e:
-                logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
                 if attempt < max_retries - 1:
                     time.sleep(5)
 
@@ -181,7 +181,7 @@ PDF Link: {result['link']}
                     bot.send_message(user_id, summary_message)
 
             except Exception as e:
-                logger.error(f"Telegram message send error to user {user_id}: {e}")
+                logger.error(f"Telegram message send error to user {user_id}: {type(e).__name__}")
 
     def process_new_results(self, bot):
         import gc
@@ -220,10 +220,10 @@ PDF Link: {result['link']}
                         logger.warning(f"Result '{result['title']}' was not added to Supabase, skipping alerts.")
 
                 except Exception as e:
-                    logger.error(f"Result processing error: {e}")
+                    logger.error(f"Result processing error: {type(e).__name__}")
 
         except Exception as e:
-            logger.error(f"Error in process_new_results: {e}")
+            logger.error(f"Error in process_new_results: {type(e).__name__}")
         finally:
             # Force garbage collection
             gc.collect()

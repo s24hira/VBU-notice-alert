@@ -80,7 +80,7 @@ class NoticeProcessor:
                 return new_notices
 
             except Exception as e:
-                logger.error(f"Error scraping notices (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(f"Error scraping notices (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
                 if attempt < max_retries - 1:
                     time.sleep(5)
                 
@@ -120,7 +120,7 @@ class NoticeProcessor:
                     return content
 
             except Exception as e:
-                logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
                 if attempt < max_retries - 1:
                     time.sleep(5)
 
@@ -150,7 +150,7 @@ PDF Link: {notice['link']}
                     bot.send_message(user_id, summary_message)
 
             except Exception as e:
-                logger.error(f"Telegram message send error to user {user_id}: {e}")
+                logger.error(f"Telegram message send error to user {user_id}: {type(e).__name__}")
 
     def process_new_notices(self, bot):
         import gc
@@ -170,7 +170,7 @@ PDF Link: {notice['link']}
                     try:
                         extraction = self.summarizer.summarize_pdf(pdf_bytes)
                     except SummarizationError as e:
-                        logger.error(f"Summarization failed: {e}")
+                        logger.error(f"Summarization failed: {type(e).__name__}")
                         logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to summarization failure.")
                         continue
                     
@@ -209,7 +209,7 @@ PDF Link: {notice['link']}
                         logger.warning(f"Notice '{notice['title']}' was not added to Supabase, skipping alerts.")
 
                 except Exception as e:
-                    logger.error(f"Notice processing error: {e}")
+                    logger.error(f"Notice processing error: {type(e).__name__}")
                 finally:
                     # Clear memory for each notice processed
                     if 'pdf_bytes' in locals():
@@ -218,7 +218,7 @@ PDF Link: {notice['link']}
                         del extraction
 
         except Exception as e:
-            logger.error(f"Error in process_new_notices: {e}")
+            logger.error(f"Error in process_new_notices: {type(e).__name__}")
         finally:
             # Force garbage collection
             gc.collect()

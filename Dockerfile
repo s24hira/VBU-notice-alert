@@ -19,7 +19,7 @@ COPY . .
 # Create directories for data and temporary files and set permissions
 RUN mkdir -p data/temp && \
     chown -R appuser:appuser data && \
-    chmod -R 755 data
+    chmod -R 700 data
 
 # Switch to the non-root user
 USER appuser
