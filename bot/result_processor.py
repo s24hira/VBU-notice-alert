@@ -174,7 +174,7 @@ PDF Link: {result['link']}
 
                 if summary_text:
                     summary_message = f"""
-📋 AI Summary:
+✨ AI Summary:
 
 {summary_text}
                     """
