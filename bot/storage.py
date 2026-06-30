@@ -143,26 +143,23 @@ class SupabaseStorage:
             logger.error(f"Failed to add notice '{notice_data.get('title')}': {type(e).__name__}")
             return None
 
-    def get_existing_notices(self):
-        """Fetches all existing notice titles and links for deduplication. Uses pagination to handle large datasets."""
+    def get_existing_notices(self, limit=100):
+        """Fetches the most recent notice titles and links for quick deduplication.
+        We only need recent ones because the scraper only checks the top 10 items on the website.
+        Older duplicates are caught by the specific query in add_notice()."""
         titles = set()
         links = set()
         try:
-            limit = 1000
-            offset = 0
-            while True:
-                response = self.supabase.table('notices').select('title, link').range(offset, offset + limit - 1).execute()
-                data = response.data
-                if not data:
-                    break
+            # Fetch only the latest records to save memory and API calls
+            response = self.supabase.table('notices').select('title, link').order('id', desc=True).limit(limit).execute()
+            data = response.data
+            
+            if data:
                 for item in data:
                     if item.get('title'):
                         titles.add(item['title'].strip())
                     if item.get('link'):
                         links.add(item['link'].strip())
-                if len(data) < limit:
-                    break
-                offset += limit
             
             return titles, links
         except Exception as e:
