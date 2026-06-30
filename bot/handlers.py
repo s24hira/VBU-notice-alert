@@ -17,6 +17,9 @@ class BotHandlers:
         self.bot = bot
         self.storage = storage
         self._rate_limit = defaultdict(list)
+        self._known_users = set()
+        self._user_is_existing = {}
+        self._setup_state = {}
         self.setup_commands()
 
     def _is_rate_limited(self, chat_id, max_calls=5, window_seconds=60):
@@ -36,9 +39,11 @@ class BotHandlers:
             if self._is_rate_limited(user_id):
                 logger.warning(f"User {user_id} rate limited.")
                 return
-            username = message.from_user.username
-            if self.storage.add_user(user_id, username):
-                logger.info(f"New user {user_id} added from {func.__name__}.")
+            if user_id not in self._known_users:
+                username = message.from_user.username
+                if self.storage.add_user(user_id, username):
+                    logger.info(f"New user {user_id} added from {func.__name__}.")
+                self._known_users.add(user_id)
             return func(message)
         return wrapper
 
@@ -98,53 +103,75 @@ class BotHandlers:
 
     def _save_name_final_handler(self, message):
         chat_id = message.chat.id
-        name = message.text.strip() if message.text else ""
         
-        if not name:
-            msg = self.bot.send_message(chat_id, "❌ Name cannot be empty. Please type your name:", reply_markup=ForceReply(selective=True))
-            self.bot.register_next_step_handler(msg, self._save_name_final_handler)
-            return
+        try:
+            if message.content_type != 'text':
+                msg = self.bot.send_message(chat_id, "❌ Please send your name as a text message:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._save_name_final_handler)
+                return
 
-        if name.startswith('/'):
-            self.bot.send_message(chat_id, "❌ Setup cancelled. You can type /start to try again.")
-            return
-
-        if len(name) > 100:
-            msg = self.bot.send_message(chat_id, "❌ Name is too long (max 100 characters). Please try again:", reply_markup=ForceReply(selective=True))
-            self.bot.register_next_step_handler(msg, self._save_name_final_handler)
-            return
-
-        # Sanitize for Telegram Markdown
-        name = re.sub(r'[*_`\[\]()~>#+\-=|{}.!]', '', name).strip()
-        if not name:
-            msg = self.bot.send_message(chat_id, "❌ Name contains only special characters. Please enter a valid name:", reply_markup=ForceReply(selective=True))
-            self.bot.register_next_step_handler(msg, self._save_name_final_handler)
-            return
-
-        # Save name in the database
-        sub = self.storage.get_subscriber(chat_id)
-        bhavana = sub.get('bhavana') if sub else None
-        department = sub.get('department') if sub else None
-        
-        success = self.storage.upsert_subscriber(chat_id, bhavana, department, name)
-        
-        if success:
-            msg_text = (
-                f"✅ **Subscription Confirmed!**\n\n"
-                f"Welcome, **{name}**!\n"
-                f"You will now receive targeted notices for:\n"
-                f"🏛️ Bhavana: {bhavana}\n"
-                f"📚 Department: {department}\n\n"
-                f"_(Use /settings to change this at any time)_"
-            )
-        else:
-            msg_text = "❌ Failed to save your subscription. Please try again later."
+            name = message.text.strip() if message.text else ""
             
-        self.bot.send_message(
-            chat_id, 
-            msg_text, 
-            parse_mode="Markdown"
-        )
+            if not name:
+                msg = self.bot.send_message(chat_id, "❌ Name cannot be empty. Please type your name:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._save_name_final_handler)
+                return
+
+            if name.startswith('/'):
+                self.bot.send_message(chat_id, "❌ Setup cancelled. You can type /start to try again.")
+                return
+
+            if len(name) > 100:
+                msg = self.bot.send_message(chat_id, "❌ Name is too long (max 100 characters). Please try again:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._save_name_final_handler)
+                return
+
+            # Sanitize for Telegram Markdown
+            name = re.sub(r'[*_`\[\]()~>#+\-=|{}.!]', '', name).strip()
+            if not name:
+                msg = self.bot.send_message(chat_id, "❌ Name contains only special characters. Please enter a valid name:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._save_name_final_handler)
+                return
+
+            # Save name in the database
+            setup_data = self._setup_state.get(chat_id)
+            if not setup_data or not setup_data.get('bhavana') or not setup_data.get('department'):
+                self.bot.send_message(
+                    chat_id, 
+                    "❌ Oops! We lost track of your Institute and Department selection. Please type /start to try again. 🙏"
+                )
+                return
+
+            bhavana = setup_data.get('bhavana')
+            department = setup_data.get('department')
+            
+            success = self.storage.upsert_subscriber(chat_id, bhavana, department, name)
+            
+            if success:
+                self._setup_state.pop(chat_id, None)
+                self._user_is_existing[chat_id] = True
+                msg_text = (
+                    f"✅ **Subscription Confirmed!**\n\n"
+                    f"Welcome, **{name}**!\n"
+                    f"You will now receive targeted notices for:\n"
+                    f"🏛️ Bhavana: {bhavana}\n"
+                    f"📚 Department: {department}\n\n"
+                    f"_(Use /settings to change this at any time)_"
+                )
+            else:
+                msg_text = "❌ Oops! We had a small hiccup while saving your subscription. Please type /start to try again. 🙏"
+                
+            self.bot.send_message(
+                chat_id, 
+                msg_text, 
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Error in _save_name_final_handler for user {chat_id}: {type(e).__name__}")
+            self.bot.send_message(
+                chat_id, 
+                "❌ An unexpected error occurred. Please try again later."
+            )
 
     def setup_commands(self):
         @self.bot.message_handler(commands=['start'])
@@ -152,7 +179,10 @@ class BotHandlers:
         def start_command(message):
             chat_id = message.chat.id
             sub = self.storage.get_subscriber(chat_id)
-            if sub and sub.get('bhavana') and sub.get('department') and sub.get('name'):
+            is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
+            self._user_is_existing[chat_id] = is_existing
+            
+            if is_existing:
                 msg_text = (
                     f"👋 You are already subscribed to VBU notice alerts!\n\n"
                     f"**Current Configuration:**\n"
@@ -165,6 +195,7 @@ class BotHandlers:
                 return
             
             # Start the setup flow directly if they are new or incomplete
+            self._setup_state[chat_id] = {}
             msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease select your **Institute (Bhavana)** to begin:"
             self.bot.send_message(
                 chat_id, 
@@ -179,9 +210,12 @@ class BotHandlers:
         def settings_command(message):
             chat_id = message.chat.id
             sub = self.storage.get_subscriber(chat_id)
+            is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
+            self._user_is_existing[chat_id] = is_existing
+            self._setup_state[chat_id] = {'name': sub.get('name')} if sub else {}
+            
             name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
             msg_text = f"🔧 **Subscription Settings**{name_str}\n\nPlease select your **Institute (Bhavana)**:"
-            is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
             self.bot.send_message(
                 chat_id, 
                 msg_text, 
@@ -216,8 +250,7 @@ class BotHandlers:
                 
                 if data == "START":
                     chat_id = call.message.chat.id
-                    sub = self.storage.get_subscriber(chat_id)
-                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
+                    is_existing = self._user_is_existing.get(chat_id, False)
                     msg_text = "Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
@@ -256,8 +289,7 @@ class BotHandlers:
                 if action == 'PB':
                     page = int(parts[1])
                     chat_id = call.message.chat.id
-                    sub = self.storage.get_subscriber(chat_id)
-                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
+                    is_existing = self._user_is_existing.get(chat_id, False)
                     msg_text = f"Please select your **Institute (Bhavana)**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
@@ -274,8 +306,7 @@ class BotHandlers:
                         return
                     bhav_name = BHAVANAS_LIST[bhav_idx]
                     chat_id = call.message.chat.id
-                    sub = self.storage.get_subscriber(chat_id)
-                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
+                    is_existing = self._user_is_existing.get(chat_id, False)
                     msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
@@ -293,8 +324,7 @@ class BotHandlers:
                     page = int(parts[2])
                     bhav_name = BHAVANAS_LIST[bhav_idx]
                     chat_id = call.message.chat.id
-                    sub = self.storage.get_subscriber(chat_id)
-                    is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
+                    is_existing = self._user_is_existing.get(chat_id, False)
                     msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
@@ -324,16 +354,15 @@ class BotHandlers:
                         dept_name = depts[dept_idx]
                     
                     chat_id = call.message.chat.id
-                    sub = self.storage.get_subscriber(chat_id)
-                    existing_name = sub.get('name') if sub else None
+                    state = self._setup_state.get(chat_id, {})
+                    existing_name = state.get('name')
 
-                    # Finalize selection for Bhavana and Dept
-                    self.storage.upsert_subscriber(
-                        chat_id=chat_id,
-                        bhavana=bhav_name,
-                        department=dept_name,
-                        name=existing_name
-                    )
+                    # Finalize selection for Bhavana and Dept in memory
+                    self._setup_state[chat_id] = {
+                        'bhavana': bhav_name,
+                        'department': dept_name,
+                        'name': existing_name
+                    }
                     
                     if not existing_name:
                         self.bot.edit_message_text(
@@ -350,6 +379,25 @@ class BotHandlers:
                         )
                         self.bot.register_next_step_handler(msg, self._save_name_final_handler)
                     else:
+                        # Existing user updating settings -> save to DB now
+                        success = self.storage.upsert_subscriber(
+                            chat_id=chat_id,
+                            bhavana=bhav_name,
+                            department=dept_name,
+                            name=existing_name
+                        )
+                        if not success:
+                            self.bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=call.message.message_id,
+                                text="❌ Oops! We had a small hiccup while saving your selection. Please type /start to try again. 🙏",
+                                parse_mode="Markdown"
+                            )
+                            return
+                            
+                        self._user_is_existing[chat_id] = True
+                        self._setup_state.pop(chat_id, None)
+                        
                         msg_text = (
                             f"✅ **Subscription Updated!**\n\n"
                             f"**{existing_name}**, you will now receive targeted notices for:\n"
