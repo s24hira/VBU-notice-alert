@@ -226,7 +226,7 @@ class GeminiPDFSummarizer:
         Initialize Gemini PDF Summarizer
         """
         self.api_key = api_key
-        self.model = 'gemini-3.1-flash-lite'
+        self.model = 'gemini-3.5-flash'
         self.url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         self._headers = {
             "Content-Type": "application/json",

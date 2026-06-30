@@ -6,7 +6,7 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 
 ## 🌟 Key Features
 
-- **Automated Monitoring:** Continuously scans the Visva-Bharati website for new notices and the Samarth portal for examination results at randomized, natural intervals (5–8 minutes).
+- **Automated Monitoring:** Continuously scans the Visva-Bharati website for new notices and the Samarth portal for examination results at randomized, natural intervals (10–20 minutes).
 - **Direct PDF Summarization:** Uses Google's **Gemini REST API** (directly over HTTP to minimize RAM overhead) to summarize PDFs inline and extract target audience parameters.
 - **Strict Notice Processing:** Mandates successful summary extraction. If summarization fails or returns empty, the notice is skipped and intelligently deferred for retry.
 - **Intelligent Retry Logic:** Integrates an exponential backoff mechanism for the Gemini API to gracefully handle sudden rate-limiting or 503 unavailability errors.

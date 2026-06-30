@@ -116,7 +116,7 @@ class VBUNoticeBot:
             logger.info(f"Initial RSS after GC: {get_rss_mb()} MB")
 
             while True:
-                next_interval = random.randint(1800, 2400)  # 30-40 minutes
+                next_interval = random.randint(600, 1200)  # 10-20 minutes
                 logger.info(f"Next check in {next_interval}s | RSS: {get_rss_mb()} MB")
                 time.sleep(next_interval)
                 
