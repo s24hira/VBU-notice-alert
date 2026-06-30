@@ -11,7 +11,7 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 - **Strict Notice Processing:** Mandates successful summary extraction. If summarization fails or returns empty, the notice is skipped and intelligently deferred for retry.
 - **Intelligent Retry Logic:** Integrates an exponential backoff mechanism for the Gemini API to gracefully handle sudden rate-limiting or 503 unavailability errors.
 - **Instant Targeted Alerts:** Dispatches notice and result titles, links, and summaries. Users receive notifications perfectly matched to their institute and department configurations!
-- **Interactive UI:** Configure your subscription seamlessly using our 2-Step Telegram Inline Keyboard flow.
+- **Interactive UI:** Configure your subscription seamlessly using our 3-Step Telegram onboarding flow.
 - **Robust Storage:** Powered by **Supabase** (PostgreSQL) for resilient, structured tracking of subscribers and notices.
 - **Interactive Verification**: Includes an end-to-end `test_alert.py` testing script to instantly verify the scraper, Gemini API, and Telegram alerts.
 - **Memory Optimized Architecture:** Addresses glibc heap fragmentation in Docker via periodic `malloc_trim(0)` calls and tuned `MALLOC_MMAP_THRESHOLD_` / `MALLOC_TRIM_THRESHOLD_` environment variables, ensuring freed memory is returned to the OS. Also recycles the Supabase `httpx` connection pool every ~3 hours and uses stateless HTTP requests with strict context managers throughout.
