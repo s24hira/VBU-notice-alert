@@ -143,13 +143,31 @@ class SupabaseStorage:
             logger.error(f"Failed to add notice '{notice_data.get('title')}': {type(e).__name__}")
             return None
 
-    def get_all_notice_urls(self):
+    def get_existing_notices(self):
+        """Fetches all existing notice titles and links for deduplication. Uses pagination to handle large datasets."""
+        titles = set()
+        links = set()
         try:
-            response = self.supabase.table('notices').select('link').execute()
-            return {notice['link'] for notice in response.data}
+            limit = 1000
+            offset = 0
+            while True:
+                response = self.supabase.table('notices').select('title, link').range(offset, offset + limit - 1).execute()
+                data = response.data
+                if not data:
+                    break
+                for item in data:
+                    if item.get('title'):
+                        titles.add(item['title'].strip())
+                    if item.get('link'):
+                        links.add(item['link'].strip())
+                if len(data) < limit:
+                    break
+                offset += limit
+            
+            return titles, links
         except Exception as e:
-            logger.error(f"Error fetching notice URLs: {type(e).__name__}")
-            return set()
+            logger.error(f"Error fetching existing notices: {type(e).__name__}")
+            return set(), set()
 
     def update_notice_status(self, record_id, status):
         try:

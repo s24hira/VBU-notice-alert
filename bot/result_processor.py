@@ -57,8 +57,8 @@ class ResultProcessor:
                     continue
 
                 new_results = []
-                existing_urls = self.storage.get_all_notice_urls()
-                logger.info(f"Fetched {len(existing_urls)} existing URLs from storage.")
+                existing_titles, existing_urls = self.storage.get_existing_notices()
+                logger.info(f"Fetched {len(existing_urls)} existing records from storage.")
 
                 for row in rows[:10]:
                     cells = row.find_all('td')
@@ -87,7 +87,7 @@ class ResultProcessor:
                     
                     pdf_link = anchor['href'].strip()
 
-                    if pdf_link not in existing_urls:
+                    if pdf_link not in existing_urls and title not in existing_titles:
                         new_results.append({
                             'title': title,
                             'link': pdf_link,

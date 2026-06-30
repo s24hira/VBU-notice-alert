@@ -43,8 +43,8 @@ class NoticeProcessor:
                     continue
 
                 new_notices = []
-                existing_notice_urls = self.storage.get_all_notice_urls()
-                logger.info(f"Fetched {len(existing_notice_urls)} existing notice URLs.")
+                existing_titles, existing_urls = self.storage.get_existing_notices()
+                logger.info(f"Fetched {len(existing_urls)} existing notice records.")
 
                 for box in notice_boxes[:10]:
                     notice_text_div = box.find('div', {'class': 'NoticeText'})
@@ -66,7 +66,7 @@ class NoticeProcessor:
                         except ValueError:
                             logger.error(f"Could not parse date: {date_string}")
 
-                    if notice_link not in existing_notice_urls:
+                    if notice_link not in existing_urls and notice_title not in existing_titles:
                         new_notices.append({
                             'title': notice_title,
                             'link': notice_link,
