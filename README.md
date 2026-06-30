@@ -90,7 +90,9 @@ SAMARTH_RESULTS_URL=https://visvabharati.samarth.edu.in/index.php/notifications/
 Interact with the bot on Telegram using:
 
 - `/start` - Setup notice alerts via the UI configuration (Institute -> Department -> Name).
-- `/settings` - Reconfigure your subscription perfectly matching your needs.
+- `/settings` - Manage your subscription:
+  - **🔄 Reset Subscription** — Re-run the full setup flow (Institute → Department → Name) without clearing existing DB data.
+  - **🗑️ Delete Account** — Permanently erase all your subscription data with a confirmation step.
 - `/status` - Check current bot status.
 - `/ping` - Confirm bot is online (responds with `Pong!`).
 

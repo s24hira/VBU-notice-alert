@@ -75,6 +75,15 @@ class SupabaseStorage:
             logger.error(f"Error fetching subscriber {chat_id}: {type(e).__name__}")
             return None
 
+    def delete_subscriber(self, chat_id):
+        try:
+            self.supabase.table('subscribers').delete().eq('telegram_chat_id', chat_id).execute()
+            logger.info(f"Subscriber {chat_id} deleted from Supabase.")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting subscriber {chat_id}: {type(e).__name__}")
+            return False
+
     def get_all_users(self):
         # Returns all users (fallback)
         try:

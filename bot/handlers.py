@@ -47,6 +47,12 @@ class BotHandlers:
             return func(message)
         return wrapper
 
+    def _build_settings_keyboard(self):
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🔄 Reset Subscription", callback_data="SETTINGS_RESET"))
+        markup.add(InlineKeyboardButton("🗑️ Delete Account", callback_data="SETTINGS_DELETE_CONFIRM"))
+        return markup
+
     def _build_bhavana_keyboard(self, page=0, show_cancel=False):
         markup = InlineKeyboardMarkup(row_width=1)
         start_idx = page * ITEMS_PER_PAGE
@@ -212,14 +218,23 @@ class BotHandlers:
             sub = self.storage.get_subscriber(chat_id)
             is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
             self._user_is_existing[chat_id] = is_existing
-            self._setup_state[chat_id] = {'name': sub.get('name')} if sub else {}
-            
+
+            if not is_existing:
+                self.bot.send_message(
+                    chat_id,
+                    "⚠️ You don't have an active subscription yet. Please use /start to set one up."
+                )
+                return
+
             name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
-            msg_text = f"🔧 **Subscription Settings**{name_str}\n\nPlease select your **Institute (Bhavana)**:"
+            msg_text = (
+                f"🔧 **Settings**{name_str}\n\n"
+                f"What would you like to do?"
+            )
             self.bot.send_message(
-                chat_id, 
-                msg_text, 
-                reply_markup=self._build_bhavana_keyboard(page=0, show_cancel=is_existing),
+                chat_id,
+                msg_text,
+                reply_markup=self._build_settings_keyboard(),
                 parse_mode="Markdown"
             )
 
@@ -279,6 +294,76 @@ class BotHandlers:
                         chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
+                        parse_mode="Markdown"
+                    )
+                    return
+
+                # ── Settings: Reset ───────────────────────────────────────────
+                if data == "SETTINGS_RESET":
+                    chat_id = call.message.chat.id
+                    # Clear name from state so the name-input step is triggered again
+                    self._setup_state[chat_id] = {}
+                    self._user_is_existing[chat_id] = True  # Keep cancel button available
+                    self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text="🔄 **Reset Subscription**\n\nPlease select your **Institute (Bhavana)**:",
+                        reply_markup=self._build_bhavana_keyboard(page=0, show_cancel=True),
+                        parse_mode="Markdown"
+                    )
+                    return
+
+                # ── Settings: Delete Account (confirm prompt) ─────────────────
+                if data == "SETTINGS_DELETE_CONFIRM":
+                    chat_id = call.message.chat.id
+                    confirm_markup = InlineKeyboardMarkup(row_width=1)
+                    confirm_markup.add(
+                        InlineKeyboardButton("⚠️ Yes, delete my account", callback_data="SETTINGS_DELETE_DO"),
+                        InlineKeyboardButton("🔙 No, go back", callback_data="SETTINGS_BACK")
+                    )
+                    self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=(
+                            "🗑️ **Delete Account**\n\n"
+                            "This will remove your subscription.\n"
+                            "Are you sure you want to continue?"
+                        ),
+                        reply_markup=confirm_markup,
+                        parse_mode="Markdown"
+                    )
+                    return
+
+                # ── Settings: Delete Account (execute) ────────────────────────
+                if data == "SETTINGS_DELETE_DO":
+                    chat_id = call.message.chat.id
+                    self.storage.delete_subscriber(chat_id)
+                    # Clear all in-memory state for this user
+                    self._setup_state.pop(chat_id, None)
+                    self._user_is_existing.pop(chat_id, None)
+                    self._known_users.discard(chat_id)
+                    self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=(
+                            "😢 **Sorry to see you go!**\n\n"
+                            "Your account has been deleted.\n\n"
+                            "If you want to come back, just send /start and we'll get you set up again. 🙏"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                    return
+
+                # ── Settings: Back to settings menu ───────────────────────────
+                if data == "SETTINGS_BACK":
+                    chat_id = call.message.chat.id
+                    sub = self.storage.get_subscriber(chat_id)
+                    name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
+                    self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=f"🔧 **Settings**{name_str}\n\nWhat would you like to do?",
+                        reply_markup=self._build_settings_keyboard(),
                         parse_mode="Markdown"
                     )
                     return
