@@ -35,7 +35,10 @@ class ResultProcessor:
         
         import certifi
 
-    def scrape_results(self, max_retries=3):
+    def scrape_results(self, existing_titles=None, existing_urls=None, max_retries=3):
+        existing_titles = existing_titles or set()
+        existing_urls = existing_urls or set()
+
         for attempt in range(max_retries):
             try:
                 with requests.get(self.website_url, timeout=30, verify=certifi.where()) as response:
@@ -57,8 +60,7 @@ class ResultProcessor:
                     continue
 
                 new_results = []
-                existing_titles, existing_urls = self.storage.get_existing_notices()
-                logger.info(f"Fetched {len(existing_urls)} existing records from storage.")
+                logger.info(f"Using {len(existing_urls)} existing records from storage for deduplication.")
 
                 for row in rows[:10]:
                     cells = row.find_all('td')
@@ -183,11 +185,11 @@ PDF Link: {result['link']}
             except Exception as e:
                 logger.error(f"Telegram message send error to user {user_id}: {type(e).__name__}")
 
-    def process_new_results(self, bot):
+    def process_new_results(self, bot, existing_titles=None, existing_urls=None):
         import gc
         try:
             logger.info("Checking for new results")
-            new_results = self.scrape_results()
+            new_results = self.scrape_results(existing_titles, existing_urls)
             logger.info(f"Found {len(new_results)} new results")
 
             for result in new_results:

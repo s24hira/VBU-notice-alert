@@ -20,6 +20,7 @@ class BotHandlers:
         self._known_users = set()
         self._user_is_existing = {}
         self._setup_state = {}
+        self._user_cache = {}  # Added memory cache for subscriber data
         self.setup_commands()
 
     def _is_rate_limited(self, chat_id, max_calls=5, window_seconds=60):
@@ -156,6 +157,12 @@ class BotHandlers:
             if success:
                 self._setup_state.pop(chat_id, None)
                 self._user_is_existing[chat_id] = True
+                self._user_cache[chat_id] = {
+                    'telegram_chat_id': chat_id,
+                    'bhavana': bhavana,
+                    'department': department,
+                    'name': name
+                }
                 msg_text = (
                     f"✅ **Subscription Confirmed!**\n\n"
                     f"Welcome, **{name}**!\n"
@@ -184,7 +191,13 @@ class BotHandlers:
         @self.ensure_user
         def start_command(message):
             chat_id = message.chat.id
-            sub = self.storage.get_subscriber(chat_id)
+            if chat_id in self._user_cache:
+                sub = self._user_cache[chat_id]
+            else:
+                sub = self.storage.get_subscriber(chat_id)
+                if sub:
+                    self._user_cache[chat_id] = sub
+                    
             is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
             self._user_is_existing[chat_id] = is_existing
             
@@ -215,7 +228,13 @@ class BotHandlers:
         @self.ensure_user
         def settings_command(message):
             chat_id = message.chat.id
-            sub = self.storage.get_subscriber(chat_id)
+            if chat_id in self._user_cache:
+                sub = self._user_cache[chat_id]
+            else:
+                sub = self.storage.get_subscriber(chat_id)
+                if sub:
+                    self._user_cache[chat_id] = sub
+                    
             is_existing = bool(sub and sub.get('bhavana') and sub.get('department') and sub.get('name'))
             self._user_is_existing[chat_id] = is_existing
 
@@ -278,7 +297,13 @@ class BotHandlers:
 
                 if data == "CANCEL":
                     chat_id = call.message.chat.id
-                    sub = self.storage.get_subscriber(chat_id)
+                    if chat_id in self._user_cache:
+                        sub = self._user_cache[chat_id]
+                    else:
+                        sub = self.storage.get_subscriber(chat_id)
+                        if sub:
+                            self._user_cache[chat_id] = sub
+                            
                     if sub and sub.get('bhavana') and sub.get('department') and sub.get('name'):
                         msg_text = (
                             f"❌ **Settings change cancelled.**\n\n"
@@ -342,6 +367,7 @@ class BotHandlers:
                     self._setup_state.pop(chat_id, None)
                     self._user_is_existing.pop(chat_id, None)
                     self._known_users.discard(chat_id)
+                    self._user_cache.pop(chat_id, None)
                     self.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=call.message.message_id,
@@ -357,7 +383,13 @@ class BotHandlers:
                 # ── Settings: Back to settings menu ───────────────────────────
                 if data == "SETTINGS_BACK":
                     chat_id = call.message.chat.id
-                    sub = self.storage.get_subscriber(chat_id)
+                    if chat_id in self._user_cache:
+                        sub = self._user_cache[chat_id]
+                    else:
+                        sub = self.storage.get_subscriber(chat_id)
+                        if sub:
+                            self._user_cache[chat_id] = sub
+                            
                     name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
                     self.bot.edit_message_text(
                         chat_id=chat_id,
@@ -482,6 +514,12 @@ class BotHandlers:
                             
                         self._user_is_existing[chat_id] = True
                         self._setup_state.pop(chat_id, None)
+                        self._user_cache[chat_id] = {
+                            'telegram_chat_id': chat_id,
+                            'bhavana': bhav_name,
+                            'department': dept_name,
+                            'name': existing_name
+                        }
                         
                         msg_text = (
                             f"✅ **Subscription Updated!**\n\n"

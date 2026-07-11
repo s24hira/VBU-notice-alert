@@ -35,8 +35,8 @@ class SupabaseStorage:
         # This add_user is kept for basic backwards compatibility with ping/status if needed,
         # but realistically they need to do /start fully.
         try:
-            # Check if user exists
-            response = self.supabase.table('subscribers').select('*').eq('telegram_chat_id', chat_id).execute()
+            # Check if user exists (fetching only the ID instead of all columns)
+            response = self.supabase.table('subscribers').select('telegram_chat_id').eq('telegram_chat_id', chat_id).execute()
             if not response.data:
                 self.supabase.table('subscribers').insert({
                     'telegram_chat_id': chat_id
@@ -120,11 +120,13 @@ class SupabaseStorage:
             title = notice_data.get('title', '')
             link = notice_data.get('link', '')
 
-            # Check if notice already exists by title or link
-            by_title = self.supabase.table('notices').select('id').eq('title', title).execute()
-            by_link = self.supabase.table('notices').select('id').eq('link', link).execute()
+            # Escape double quotes in title
+            safe_title = title.replace('"', '\\"')
             
-            if by_title.data or by_link.data:
+            # Check if notice already exists by title or link using a single OR query
+            duplicate = self.supabase.table('notices').select('id').or_(f'title.eq."{safe_title}",link.eq."{link}"').execute()
+            
+            if duplicate.data:
                 logger.info(f"Notice '{title}' already exists. Skipping.")
                 return None
 

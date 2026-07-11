@@ -107,8 +107,9 @@ class VBUNoticeBot:
             # Initial run
             try:
                 logger.info("Starting initial notice and result check")
-                self.notice_processor.process_new_notices(self.bot)
-                self.result_processor.process_new_results(self.bot)
+                existing_titles, existing_urls = self.storage.get_existing_notices()
+                self.notice_processor.process_new_notices(self.bot, existing_titles, existing_urls)
+                self.result_processor.process_new_results(self.bot, existing_titles, existing_urls)
             except Exception as e:
                 logger.error(f"Error in initial check: {type(e).__name__}")
 
@@ -121,8 +122,9 @@ class VBUNoticeBot:
                 time.sleep(next_interval)
                 
                 try:
-                    self.notice_processor.process_new_notices(self.bot)
-                    self.result_processor.process_new_results(self.bot)
+                    existing_titles, existing_urls = self.storage.get_existing_notices()
+                    self.notice_processor.process_new_notices(self.bot, existing_titles, existing_urls)
+                    self.result_processor.process_new_results(self.bot, existing_titles, existing_urls)
                 except Exception as e:
                     logger.error(f"Error in scheduled job: {type(e).__name__}")
 

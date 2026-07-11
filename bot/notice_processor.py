@@ -31,7 +31,10 @@ class NoticeProcessor:
         except Exception:
             return False
 
-    def scrape_notices(self, max_retries=3):
+    def scrape_notices(self, existing_titles=None, existing_urls=None, max_retries=3):
+        existing_titles = existing_titles or set()
+        existing_urls = existing_urls or set()
+
         for attempt in range(max_retries):
             try:
                 with requests.get(self.website_url, timeout=30) as response:
@@ -43,8 +46,7 @@ class NoticeProcessor:
                     continue
 
                 new_notices = []
-                existing_titles, existing_urls = self.storage.get_existing_notices()
-                logger.info(f"Fetched {len(existing_urls)} existing notice records.")
+                logger.info(f"Using {len(existing_urls)} existing notice records for deduplication.")
 
                 for box in notice_boxes[:10]:
                     notice_text_div = box.find('div', {'class': 'NoticeText'})
@@ -152,11 +154,11 @@ PDF Link: {notice['link']}
             except Exception as e:
                 logger.error(f"Telegram message send error to user {user_id}: {type(e).__name__}")
 
-    def process_new_notices(self, bot):
+    def process_new_notices(self, bot, existing_titles=None, existing_urls=None):
         import gc
         try:
             logger.info("Checking for new notices")
-            new_notices = self.scrape_notices()
+            new_notices = self.scrape_notices(existing_titles, existing_urls)
             logger.info(f"Found {len(new_notices)} new notices")
 
             for notice in new_notices:
