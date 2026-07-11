@@ -42,14 +42,23 @@ class NoticeProcessor:
         existing_titles = existing_titles or set()
         existing_urls = existing_urls or set()
 
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        }
+
         for attempt in range(max_retries):
             try:
-                with requests.get(self.website_url, timeout=30, verify=certifi.where()) as response:
+                with requests.get(self.website_url, headers=headers, timeout=30, verify=certifi.where()) as response:
+                    response.raise_for_status()
                     soup = BeautifulSoup(response.content, 'html.parser')
 
                 notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
                 if not notice_boxes:
-                    logger.error("Could not find any an-noticebox divs.")
+                    page_title = soup.title.string.strip() if soup.title and soup.title.string else "No Title"
+                    logger.error(f"Could not find any an-noticebox divs. Status: {response.status_code} | Page Title: {page_title}")
+                    if attempt < max_retries - 1:
+                        time.sleep(5)
                     continue
 
                 new_notices = []
@@ -100,9 +109,14 @@ class NoticeProcessor:
             logger.error(f"Unsafe or unauthorized URL requested: {pdf_url}")
             return None
 
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        }
+
         for attempt in range(max_retries):
             try:
-                with requests.get(pdf_url, timeout=30, verify=certifi.where(), stream=True) as response:
+                with requests.get(pdf_url, headers=headers, timeout=30, verify=certifi.where(), stream=True) as response:
+                    response.raise_for_status()
                     content_length = int(response.headers.get('content-length', 0))
                     if content_length > self.MAX_PDF_SIZE:
                         logger.error(f"PDF too large: {content_length} bytes")
