@@ -6,11 +6,20 @@ from functools import wraps
 
 import re
 from collections import defaultdict
+from cachetools import TTLCache
 from bot.constants import BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
 
 logger = logging.getLogger(__name__)
 
 ITEMS_PER_PAGE = 6
+# Maximum pages to allow for bhavana / department pagination
+_MAX_BHAVANA_PAGE = (len(BHAVANAS_LIST) - 1) // ITEMS_PER_PAGE
+
+
+def _escape_markdown(text: str) -> str:
+    """Escape special characters for Telegram Markdown (v1) to prevent injection."""
+    # Characters that have special meaning in Telegram's Markdown v1
+    return re.sub(r'([*_`\[\]])', r'\\\1', text)
 
 class BotHandlers:
     def __init__(self, bot, storage):
@@ -20,7 +29,9 @@ class BotHandlers:
         self._known_users = set()
         self._user_is_existing = {}
         self._setup_state = {}
-        self._user_cache = {}  # Added memory cache for subscriber data
+        # Bounded TTL caches — prevent unbounded memory growth over time.
+        # Entries expire after 2 hours; at most 10 000 concurrent users cached.
+        self._user_cache = TTLCache(maxsize=10_000, ttl=7200)
         self.setup_commands()
 
     def _is_rate_limited(self, chat_id, max_calls=5, window_seconds=60):
@@ -134,7 +145,7 @@ class BotHandlers:
                 return
 
             # Sanitize for Telegram Markdown
-            name = re.sub(r'[*_`\[\]()~>#+\-=|{}.!]', '', name).strip()
+            name = re.sub(r'[*_`\[\]()~<>#+\-=|{}.!]', '', name).strip()
             if not name:
                 msg = self.bot.send_message(chat_id, "❌ Name contains only special characters. Please enter a valid name:", reply_markup=ForceReply(selective=True))
                 self.bot.register_next_step_handler(msg, self._save_name_final_handler)
@@ -163,9 +174,10 @@ class BotHandlers:
                     'department': department,
                     'name': name
                 }
+                safe_name = _escape_markdown(name)
                 msg_text = (
                     f"✅ **Subscription Confirmed!**\n\n"
-                    f"Welcome, **{name}**!\n"
+                    f"Welcome, **{safe_name}**!\n"
                     f"You will now receive targeted notices for:\n"
                     f"🏛️ Bhavana: {bhavana}\n"
                     f"📚 Department: {department}\n\n"
@@ -179,8 +191,8 @@ class BotHandlers:
                 msg_text, 
                 parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Error in _save_name_final_handler for user {chat_id}: {type(e).__name__}")
+        except Exception:
+            logger.exception(f"Error in _save_name_final_handler for user {chat_id}")
             self.bot.send_message(
                 chat_id, 
                 "❌ An unexpected error occurred. Please try again later."
@@ -279,6 +291,13 @@ class BotHandlers:
         @self.bot.callback_query_handler(func=lambda call: True)
         def callback_query(call):
             try:
+                # Security: Only process callbacks in private chats where the
+                # button presser is the chat owner. Prevents one user from
+                # triggering account actions (e.g. deletion) on another user's behalf.
+                if call.from_user.id != call.message.chat.id:
+                    self.bot.answer_callback_query(call.id, "Unauthorized action.")
+                    return
+
                 self.bot.answer_callback_query(call.id)
                 data = call.data
                 
@@ -404,7 +423,14 @@ class BotHandlers:
                 action = parts[0]
                 
                 if action == 'PB':
-                    page = int(parts[1])
+                    try:
+                        page = int(parts[1])
+                    except (ValueError, IndexError):
+                        logger.warning(f"Malformed PB callback data '{data}' from user {call.message.chat.id}")
+                        return
+                    if not (0 <= page <= _MAX_BHAVANA_PAGE):
+                        logger.warning(f"Out-of-bounds page {page} in PB from user {call.message.chat.id}")
+                        return
                     chat_id = call.message.chat.id
                     is_existing = self._user_is_existing.get(chat_id, False)
                     msg_text = f"Please select your **Institute (Bhavana)**:"
@@ -417,7 +443,11 @@ class BotHandlers:
                     )
 
                 elif action == 'B':
-                    bhav_idx = int(parts[1])
+                    try:
+                        bhav_idx = int(parts[1])
+                    except (ValueError, IndexError):
+                        logger.warning(f"Malformed B callback data '{data}' from user {call.message.chat.id}")
+                        return
                     if not (0 <= bhav_idx < len(BHAVANAS_LIST)):
                         logger.warning(f"Invalid bhavana index {bhav_idx} from user {call.message.chat.id}")
                         return
@@ -434,12 +464,20 @@ class BotHandlers:
                     )
 
                 elif action == 'PD':
-                    bhav_idx = int(parts[1])
+                    try:
+                        bhav_idx = int(parts[1])
+                        page = int(parts[2])
+                    except (ValueError, IndexError):
+                        logger.warning(f"Malformed PD callback data '{data}' from user {call.message.chat.id}")
+                        return
                     if not (0 <= bhav_idx < len(BHAVANAS_LIST)):
                         logger.warning(f"Invalid bhavana index {bhav_idx} from user {call.message.chat.id}")
                         return
-                    page = int(parts[2])
                     bhav_name = BHAVANAS_LIST[bhav_idx]
+                    max_dept_page = (len(BHAVANA_DEPARTMENTS_MAP.get(bhav_name, [])) - 1) // ITEMS_PER_PAGE
+                    if not (0 <= page <= max(0, max_dept_page)):
+                        logger.warning(f"Out-of-bounds page {page} in PD from user {call.message.chat.id}")
+                        return
                     chat_id = call.message.chat.id
                     is_existing = self._user_is_existing.get(chat_id, False)
                     msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
@@ -452,8 +490,12 @@ class BotHandlers:
                     )
 
                 elif action == 'D':
-                    bhav_idx = int(parts[1])
-                    dept_idx = int(parts[2])
+                    try:
+                        bhav_idx = int(parts[1])
+                        dept_idx = int(parts[2])
+                    except (ValueError, IndexError):
+                        logger.warning(f"Malformed D callback data '{data}' from user {call.message.chat.id}")
+                        return
                     
                     if not (0 <= bhav_idx < len(BHAVANAS_LIST)):
                         logger.warning(f"Invalid bhavana index {bhav_idx} from user {call.message.chat.id}")
@@ -535,5 +577,5 @@ class BotHandlers:
                             parse_mode="Markdown"
                         )
 
-            except Exception as e:
-                logger.error(f"Callback query error: {type(e).__name__}")
+            except Exception:
+                logger.exception("Callback query error")

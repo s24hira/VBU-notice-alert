@@ -21,7 +21,9 @@ class ResultProcessor:
         self.ALLOWED_DOMAINS = [
             'visvabharati.ac.in',
             'visvabharati.samarth.edu.in',
-            'amazonaws.com',
+            # Pinned to the exact S3 bucket hostname used by Samarth.
+            # The signed query params (X-Amz-*) are dynamic but the hostname is stable.
+            'samarth-ac.s3.ap-south-1.amazonaws.com',
         ]
 
     def _is_safe_url(self, url):
@@ -29,11 +31,16 @@ class ResultProcessor:
             parsed = urlparse(url)
             if parsed.scheme not in ('http', 'https'):
                 return False
-            return any(parsed.hostname and parsed.hostname.endswith(domain) for domain in self.ALLOWED_DOMAINS)
+            host = parsed.hostname or ''
+            # Exact match OR proper subdomain (host ends with '.<domain>')
+            # This prevents 'evil-visvabharati.ac.in' from matching 'visvabharati.ac.in'
+            return any(
+                host == domain or host.endswith('.' + domain)
+                for domain in self.ALLOWED_DOMAINS
+            )
         except Exception:
             return False
-        
-        import certifi
+        # NOTE: dead `import certifi` line removed — certifi is imported at module level
 
     def scrape_results(self, existing_titles=None, existing_urls=None, max_retries=3):
         existing_titles = existing_titles or set()
@@ -81,7 +88,7 @@ class ResultProcessor:
                             # Fallback: Just parse the first 11 chars (e.g. "22 Jun 2026")
                             notice_date = datetime.datetime.strptime(date_string[:11], '%d %b %Y')
                         except ValueError:
-                            logger.error(f"Could not parse date: {date_string}")
+                            logger.exception(f"Could not parse date: {date_string}")
 
                     anchor = cells[2].find('a')
                     if not anchor or 'href' not in anchor.attrs:
@@ -104,8 +111,8 @@ class ResultProcessor:
 
                 return new_results
 
-            except Exception as e:
-                logger.error(f"Error scraping results (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
+            except Exception:
+                logger.exception(f"Error scraping results (attempt {attempt + 1}/{max_retries})")
                 if attempt < max_retries - 1:
                     time.sleep(5)
                 
@@ -152,8 +159,8 @@ class ResultProcessor:
 
                     return content
 
-            except Exception as e:
-                logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
+            except Exception:
+                logger.exception(f"PDF download error (attempt {attempt + 1}/{max_retries})")
                 if attempt < max_retries - 1:
                     time.sleep(5)
 
@@ -182,8 +189,8 @@ PDF Link: {result['link']}
                     """
                     bot.send_message(user_id, summary_message)
 
-            except Exception as e:
-                logger.error(f"Telegram message send error to user {user_id}: {type(e).__name__}")
+            except Exception:
+                logger.exception(f"Telegram message send error to user {user_id}")
 
     def process_new_results(self, bot, existing_titles=None, existing_urls=None):
         import gc
@@ -221,11 +228,11 @@ PDF Link: {result['link']}
                     else:
                         logger.warning(f"Result '{result['title']}' was not added to Supabase, skipping alerts.")
 
-                except Exception as e:
-                    logger.error(f"Result processing error: {type(e).__name__}")
+                except Exception:
+                    logger.exception("Result processing error")
 
-        except Exception as e:
-            logger.error(f"Error in process_new_results: {type(e).__name__}")
+        except Exception:
+            logger.exception("Error in process_new_results")
         finally:
             # Force garbage collection
             gc.collect()

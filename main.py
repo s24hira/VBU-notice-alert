@@ -146,15 +146,25 @@ class VBUNoticeBot:
             logger.error(f"Error in main loop: {type(e).__name__}")
             raise
 
-class HealthCheckHandler(http.server.SimpleHTTPRequestHandler):
+class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
+    """Minimal HTTP handler for Koyeb TCP health checks.
+
+    Deliberately uses BaseHTTPRequestHandler to prevent static-file serving
+    from the container's working directory.
+    Only responds 200 OK to GET /  and GET /health; everything else is 404.
+    """
     def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'OK')
-        
+        if self.path in ('/', '/health'):
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def log_message(self, format, *args):
-        # Disable logging for health checks to prevent log spam
+        # Suppress per-request access logs to keep stdout clean
         pass
 
 def start_health_server(port=8000):

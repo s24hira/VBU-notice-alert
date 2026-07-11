@@ -1,6 +1,7 @@
 import os
 import logging
 import requests
+import certifi
 import datetime
 from bs4 import BeautifulSoup
 import time
@@ -27,7 +28,13 @@ class NoticeProcessor:
             parsed = urlparse(url)
             if parsed.scheme not in ('http', 'https'):
                 return False
-            return any(parsed.hostname and parsed.hostname.endswith(domain) for domain in self.ALLOWED_DOMAINS)
+            host = parsed.hostname or ''
+            # Exact match OR proper subdomain (host ends with '.<domain>')
+            # This prevents 'evil-visvabharati.ac.in' from matching 'visvabharati.ac.in'
+            return any(
+                host == domain or host.endswith('.' + domain)
+                for domain in self.ALLOWED_DOMAINS
+            )
         except Exception:
             return False
 
@@ -37,7 +44,7 @@ class NoticeProcessor:
 
         for attempt in range(max_retries):
             try:
-                with requests.get(self.website_url, timeout=30) as response:
+                with requests.get(self.website_url, timeout=30, verify=certifi.where()) as response:
                     soup = BeautifulSoup(response.content, 'html.parser')
 
                 notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
@@ -66,7 +73,7 @@ class NoticeProcessor:
                         try:
                             notice_date = datetime.datetime.strptime(date_string, '%b %d %Y')
                         except ValueError:
-                            logger.error(f"Could not parse date: {date_string}")
+                            logger.exception(f"Could not parse date: {date_string}")
 
                     if notice_link not in existing_urls and notice_title not in existing_titles:
                         new_notices.append({
@@ -81,8 +88,8 @@ class NoticeProcessor:
 
                 return new_notices
 
-            except Exception as e:
-                logger.error(f"Error scraping notices (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
+            except Exception:
+                logger.exception(f"Error scraping notices (attempt {attempt + 1}/{max_retries})")
                 if attempt < max_retries - 1:
                     time.sleep(5)
                 
@@ -95,7 +102,7 @@ class NoticeProcessor:
 
         for attempt in range(max_retries):
             try:
-                with requests.get(pdf_url, timeout=30, stream=True) as response:
+                with requests.get(pdf_url, timeout=30, verify=certifi.where(), stream=True) as response:
                     content_length = int(response.headers.get('content-length', 0))
                     if content_length > self.MAX_PDF_SIZE:
                         logger.error(f"PDF too large: {content_length} bytes")
@@ -121,8 +128,8 @@ class NoticeProcessor:
 
                     return content
 
-            except Exception as e:
-                logger.error(f"PDF download error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}")
+            except Exception:
+                logger.exception(f"PDF download error (attempt {attempt + 1}/{max_retries})")
                 if attempt < max_retries - 1:
                     time.sleep(5)
 
@@ -151,8 +158,8 @@ PDF Link: {notice['link']}
                     """
                     bot.send_message(user_id, summary_message)
 
-            except Exception as e:
-                logger.error(f"Telegram message send error to user {user_id}: {type(e).__name__}")
+            except Exception:
+                logger.exception(f"Telegram message send error to user {user_id}")
 
     def process_new_notices(self, bot, existing_titles=None, existing_urls=None):
         import gc
@@ -171,8 +178,8 @@ PDF Link: {notice['link']}
                     logger.info("Generating summary using Gemini")
                     try:
                         extraction = self.summarizer.summarize_pdf(pdf_bytes)
-                    except SummarizationError as e:
-                        logger.error(f"Summarization failed: {type(e).__name__}")
+                    except SummarizationError:
+                        logger.exception("Summarization failed")
                         logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to summarization failure.")
                         continue
                     
@@ -210,8 +217,8 @@ PDF Link: {notice['link']}
                     else:
                         logger.warning(f"Notice '{notice['title']}' was not added to Supabase, skipping alerts.")
 
-                except Exception as e:
-                    logger.error(f"Notice processing error: {type(e).__name__}")
+                except Exception:
+                    logger.exception("Notice processing error")
                 finally:
                     # Clear memory for each notice processed
                     if 'pdf_bytes' in locals():
@@ -219,8 +226,8 @@ PDF Link: {notice['link']}
                     if 'extraction' in locals():
                         del extraction
 
-        except Exception as e:
-            logger.error(f"Error in process_new_notices: {type(e).__name__}")
+        except Exception:
+            logger.exception("Error in process_new_notices")
         finally:
             # Force garbage collection
             gc.collect()

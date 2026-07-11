@@ -117,3 +117,37 @@ Interact with the bot on Telegram using:
 ├── Dockerfile                # Multi-stage lightweight Docker image
 └── docker-compose.yml        # Docker Compose configuration
 ```
+
+---
+
+## ☁️ Deployment on Koyeb
+
+The bot runs as a **Web Service** on Koyeb with a TCP health check on **port 8000**.
+
+1. **Set environment variables** in the Koyeb dashboard (never commit `.env`):
+   - `TELEGRAM_BOT_TOKEN`
+   - `GEMINI_API_KEY`
+   - `SUPABASE_URL`
+   - `SUPABASE_KEY`
+
+2. **Health check**: configure Koyeb to check `GET /health` on port `8000`.
+
+3. **Port**: set the service port to `8000`.
+
+---
+
+## 🔒 Security
+
+The codebase has been hardened against the following:
+
+| Area | Mitigation |
+|------|-----------|
+| Health check server | Uses `BaseHTTPRequestHandler`; only `/` and `/health` return 200, all other paths 404. Static file serving is explicitly prevented. |
+| Secrets | All credentials are injected as environment variables. `.env` is in both `.gitignore` and `.dockerignore`. |
+| Callback origin | Every Telegram inline callback validates `from_user.id == chat.id` before processing account-level actions. |
+| Callback data | All integer values parsed from callback payloads are wrapped in `try/except` with explicit bounds checks for page indices. |
+| URL allowlist | Outbound requests are restricted to `visvabharati.ac.in`, `visvabharati.samarth.edu.in`, and the exact S3 bucket `samarth-ac.s3.ap-south-1.amazonaws.com`. |
+| TLS | All outbound HTTP requests use `certifi` for certificate verification. |
+| Memory | In-memory user caches use `TTLCache(maxsize=10_000, ttl=7200)` to prevent unbounded growth. |
+| Markdown injection | User-supplied names are sanitized and then escaped before insertion into Markdown messages. |
+| Logging | All `except` blocks use `logger.exception()` to capture full stack traces. |
