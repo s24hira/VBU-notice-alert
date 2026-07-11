@@ -24,6 +24,9 @@ RUN mkdir -p data/temp && \
 # Switch to the non-root user
 USER appuser
 
+# Expose port 8000 for health checks
+EXPOSE 8000
+
 # Tune glibc to aggressively return freed memory to the OS.
 # MALLOC_TRIM_THRESHOLD_: Trim heap when 64KB+ free space accumulates.
 # MALLOC_MMAP_THRESHOLD_: Allocations >128KB use mmap (freed instantly on free()).

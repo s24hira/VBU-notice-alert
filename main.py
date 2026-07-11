@@ -7,6 +7,8 @@ import time
 from dotenv import load_dotenv
 import threading
 import gc
+import http.server
+import socketserver
 
 # Prevent requests.Session memory bloat by recreating it every 5 minutes
 apihelper.SESSION_TIME_TO_LIVE = 5 * 60
@@ -144,8 +146,33 @@ class VBUNoticeBot:
             logger.error(f"Error in main loop: {type(e).__name__}")
             raise
 
+class HealthCheckHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+        
+    def log_message(self, format, *args):
+        # Disable logging for health checks to prevent log spam
+        pass
+
+def start_health_server(port=8000):
+    socketserver.TCPServer.allow_reuse_address = True
+    try:
+        with socketserver.TCPServer(("", port), HealthCheckHandler) as httpd:
+            logger.info(f"Health check server listening on port {port}")
+            httpd.serve_forever()
+    except Exception as e:
+        logger.error(f"Failed to start health check server: {e}")
+
 def main():
     logger.info("Starting Visva-Bharati Notice Bot application...")
+    
+    # Start the health check server in a background thread
+    health_thread = threading.Thread(target=start_health_server, kwargs={'port': 8000}, daemon=True)
+    health_thread.start()
+    
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
         return
