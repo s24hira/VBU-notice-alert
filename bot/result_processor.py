@@ -7,6 +7,8 @@ import time
 from urllib.parse import urlparse
 import certifi
 
+from bot.utils.http_client import resilient_get, resilient_get_pdf
+
 from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError, NoticeExtraction
 from bot.storage import SupabaseStorage
 
@@ -46,84 +48,74 @@ class ResultProcessor:
         existing_titles = existing_titles or set()
         existing_urls = existing_urls or set()
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        }
+        try:
+            response = resilient_get(self.website_url, timeout=30,
+                                     max_retries=max_retries)
+            soup = BeautifulSoup(response.content, 'html.parser')
 
-        for attempt in range(max_retries):
-            try:
-                with requests.get(self.website_url, headers=headers, timeout=30, verify=certifi.where()) as response:
-                    response.raise_for_status()
-                    soup = BeautifulSoup(response.content, 'html.parser')
+            tables = soup.find_all('table')
+            if not tables:
+                page_title = soup.title.string.strip() if soup.title and soup.title.string else "No Title"
+                logger.error(f"Could not find any tables on Samarth result page. Status: {response.status_code} | Page Title: {page_title}")
+                return []
+            
+            tbody = tables[0].find('tbody')
+            if not tbody:
+                logger.error("Could not find tbody in Samarth table.")
+                return []
 
-                tables = soup.find_all('table')
-                if not tables:
-                    page_title = soup.title.string.strip() if soup.title and soup.title.string else "No Title"
-                    logger.error(f"Could not find any tables on Samarth result page. Status: {response.status_code} | Page Title: {page_title}")
-                    if attempt < max_retries - 1:
-                        time.sleep(5)
+            rows = tbody.find_all('tr', attrs={'data-key': True})
+            if not rows:
+                logger.error("Could not find any data rows in Samarth table.")
+                return []
+
+            new_results = []
+            logger.info(f"Using {len(existing_urls)} existing records from storage for deduplication.")
+
+            for row in rows[:10]:
+                cells = row.find_all('td')
+                if len(cells) < 3:
                     continue
                 
-                tbody = tables[0].find('tbody')
-                if not tbody:
-                    logger.error("Could not find tbody in Samarth table.")
-                    continue
-
-                rows = tbody.find_all('tr', attrs={'data-key': True})
-                if not rows:
-                    logger.error("Could not find any data rows in Samarth table.")
-                    continue
-
-                new_results = []
-                logger.info(f"Using {len(existing_urls)} existing records from storage for deduplication.")
-
-                for row in rows[:10]:
-                    cells = row.find_all('td')
-                    if len(cells) < 3:
-                        continue
-                    
-                    title = cells[0].text.strip()
-                    
-                    date_string = cells[1].text.strip()
-                    notice_date = None
+                title = cells[0].text.strip()
+                
+                date_string = cells[1].text.strip()
+                notice_date = None
+                try:
+                    # Samarth date format example: 22 Jun 2026 00:05:35 AM
+                    # Python's %I expects 01-12, so if they use 00: for AM we fix it
+                    fixed_date_string = date_string.replace(' 00:', ' 12:')
+                    notice_date = datetime.datetime.strptime(fixed_date_string, '%d %b %Y %I:%M:%S %p')
+                except ValueError:
                     try:
-                        # Samarth date format example: 22 Jun 2026 00:05:35 AM
-                        # Python's %I expects 01-12, so if they use 00: for AM we fix it
-                        fixed_date_string = date_string.replace(' 00:', ' 12:')
-                        notice_date = datetime.datetime.strptime(fixed_date_string, '%d %b %Y %I:%M:%S %p')
+                        # Fallback: Just parse the first 11 chars (e.g. "22 Jun 2026")
+                        notice_date = datetime.datetime.strptime(date_string[:11], '%d %b %Y')
                     except ValueError:
-                        try:
-                            # Fallback: Just parse the first 11 chars (e.g. "22 Jun 2026")
-                            notice_date = datetime.datetime.strptime(date_string[:11], '%d %b %Y')
-                        except ValueError:
-                            logger.exception(f"Could not parse date: {date_string}")
+                        logger.exception(f"Could not parse date: {date_string}")
 
-                    anchor = cells[2].find('a')
-                    if not anchor or 'href' not in anchor.attrs:
-                        continue
-                    
-                    pdf_link = anchor['href'].strip()
+                anchor = cells[2].find('a')
+                if not anchor or 'href' not in anchor.attrs:
+                    continue
+                
+                pdf_link = anchor['href'].strip()
 
-                    if pdf_link not in existing_urls and title not in existing_titles:
-                        new_results.append({
-                            'title': title,
-                            'link': pdf_link,
-                            'date': notice_date
-                        })
+                if pdf_link not in existing_urls and title not in existing_titles:
+                    new_results.append({
+                        'title': title,
+                        'link': pdf_link,
+                        'date': notice_date
+                    })
 
-                # Free memory
-                del rows
-                del tbody
-                del tables
-                del soup
+            # Free memory
+            del rows
+            del tbody
+            del tables
+            del soup
 
-                return new_results
+            return new_results
 
-            except Exception:
-                logger.exception(f"Error scraping results (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    time.sleep(5)
+        except Exception:
+            logger.exception("Error scraping results after all bypass strategies")
                 
         return []
 
@@ -132,51 +124,36 @@ class ResultProcessor:
             logger.error(f"Unsafe or unauthorized URL requested: {pdf_url}")
             return None
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
+        try:
+            response = resilient_get_pdf(pdf_url, timeout=30,
+                                         max_retries=max_retries)
 
-        for attempt in range(max_retries):
-            try:
-                with requests.get(pdf_url, headers=headers, timeout=30, verify=certifi.where(), stream=True) as response:
-                    response.raise_for_status()
-                    content_length = int(response.headers.get('content-length', 0))
-                    if content_length > self.MAX_PDF_SIZE:
-                        logger.error(f"PDF too large: {content_length} bytes")
-                        return None
+            content_length = int(response.headers.get('content-length', 0))
+            if content_length > self.MAX_PDF_SIZE:
+                logger.error(f"PDF too large: {content_length} bytes")
+                return None
 
-                    if not response.headers.get('content-type', '').startswith('application/pdf'):
-                        # S3 might return binary/octet-stream sometimes, so we check content
-                        # Since it's streaming, we need to read the first chunk to check
-                        pass # Moved check below after reading first chunk
+            # curl_cffi responses don't support iter_content, so read all at once
+            content = response.content
 
-                    chunks = []
-                    downloaded = 0
-                    first_chunk = True
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if first_chunk:
-                            if not response.headers.get('content-type', '').startswith('application/pdf') and b'%PDF-' not in chunk[:50]:
-                                logger.error("Downloaded file does not appear to be a PDF")
-                                return None
-                            first_chunk = False
+            # Validate it's actually a PDF
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('application/pdf') and b'%PDF-' not in content[:50]:
+                logger.error("Downloaded file does not appear to be a PDF")
+                return None
 
-                        downloaded += len(chunk)
-                        if downloaded > self.MAX_PDF_SIZE:
-                            logger.error("PDF exceeds size limit during download")
-                            return None
-                        chunks.append(chunk)
+            if len(content) > self.MAX_PDF_SIZE:
+                logger.error("PDF exceeds size limit")
+                return None
 
-                    content = b''.join(chunks)
-                    if len(content) < 100:
-                        logger.error("Downloaded PDF file is too small")
-                        return None
+            if len(content) < 100:
+                logger.error("Downloaded PDF file is too small")
+                return None
 
-                    return content
+            return content
 
-            except Exception:
-                logger.exception(f"PDF download error (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    time.sleep(5)
+        except Exception:
+            logger.exception(f"PDF download failed after all strategies")
 
         return None
 

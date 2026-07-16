@@ -1,0 +1,288 @@
+"""
+Resilient HTTP client with multi-strategy anti-bot bypass.
+
+The Samarth eGov portal blocks requests from datacenter IPs and
+simple HTTP clients.  This module layers several bypass strategies
+that mimic real browser traffic:
+
+    Strategy 1 – cloudscraper   (defeats Cloudflare / JS challenges)
+    Strategy 2 – curl_cffi      (impersonates Chrome's TLS fingerprint)
+    Strategy 3 – requests.Session with full browser headers + cookie warmup
+
+Each strategy is tried in order; on a 403 the next one is attempted.
+All strategies share the same randomized User-Agent pool and send a
+complete set of headers that match a real Chrome browser.
+"""
+
+import logging
+import random
+import time
+
+import certifi
+import requests
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# User-Agent pool – rotated on every request
+# ---------------------------------------------------------------------------
+_USER_AGENTS = [
+    # Chrome on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+    # Chrome on macOS
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Firefox on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    # Edge
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+]
+
+
+def _pick_ua():
+    return random.choice(_USER_AGENTS)
+
+
+def _chrome_headers(url: str, ua: str | None = None) -> dict:
+    """Return a full set of Chrome-grade request headers."""
+    ua = ua or _pick_ua()
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    return {
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                  "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                  "application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Cache-Control": "max-age=0",
+        "Referer": origin + "/",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Strategy 1 – cloudscraper
+# ---------------------------------------------------------------------------
+def _try_cloudscraper(url: str, timeout: int = 30) -> requests.Response | None:
+    """Use cloudscraper to bypass Cloudflare / JS-challenge protections."""
+    try:
+        import cloudscraper
+    except ImportError:
+        logger.debug("cloudscraper not installed – skipping strategy")
+        return None
+
+    try:
+        scraper = cloudscraper.create_scraper(
+            browser={
+                "browser": "chrome",
+                "platform": "windows",
+                "desktop": True,
+            },
+        )
+        # Overlay our realistic headers on top of cloudscraper's defaults
+        headers = _chrome_headers(url)
+        scraper.headers.update(headers)
+
+        resp = scraper.get(url, timeout=timeout, verify=certifi.where())
+        if resp.status_code == 403:
+            logger.warning("cloudscraper got 403 – will try next strategy")
+            return None
+        resp.raise_for_status()
+        return resp
+    except Exception:
+        logger.exception("cloudscraper strategy failed")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Strategy 2 – curl_cffi  (impersonates Chrome's TLS JA3 fingerprint)
+# ---------------------------------------------------------------------------
+def _try_curl_cffi(url: str, timeout: int = 30) -> requests.Response | None:
+    """Use curl_cffi to send requests with Chrome's real TLS fingerprint."""
+    try:
+        from curl_cffi import requests as cffi_requests
+    except ImportError:
+        logger.debug("curl_cffi not installed – skipping strategy")
+        return None
+
+    try:
+        headers = _chrome_headers(url)
+        resp = cffi_requests.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            verify=certifi.where(),
+            impersonate="chrome131",       # JA3 fingerprint of Chrome 131
+        )
+        if resp.status_code == 403:
+            logger.warning("curl_cffi got 403 – will try next strategy")
+            return None
+        resp.raise_for_status()
+        return resp
+    except Exception:
+        logger.exception("curl_cffi strategy failed")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Strategy 3 – plain requests.Session with cookie warm-up
+# ---------------------------------------------------------------------------
+def _try_session_warmup(url: str, timeout: int = 30) -> requests.Response | None:
+    """
+    Use a plain requests.Session but warm it up first:
+      1. Hit the root domain to collect cookies / pass server-side checks.
+      2. Then request the target URL with the populated cookie jar.
+    """
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        root_url = f"{parsed.scheme}://{parsed.netloc}/"
+
+        session = requests.Session()
+        ua = _pick_ua()
+        headers = _chrome_headers(url, ua=ua)
+        session.headers.update(headers)
+
+        # Step 1 – warm-up: hit root to acquire session cookies / CSRF
+        try:
+            warmup = session.get(root_url, timeout=15, verify=certifi.where(),
+                                 allow_redirects=True)
+            logger.debug(f"Warmup status: {warmup.status_code}, "
+                         f"cookies: {len(session.cookies)}")
+        except Exception:
+            logger.debug("Warmup request failed – continuing anyway")
+
+        # Small human-like pause
+        time.sleep(random.uniform(0.5, 1.5))
+
+        # Step 2 – now request the actual page with cookies
+        # Update referer to look like an internal navigation
+        session.headers["Referer"] = root_url
+        session.headers["Sec-Fetch-Site"] = "same-origin"
+
+        resp = session.get(url, timeout=timeout, verify=certifi.where(),
+                           allow_redirects=True)
+        if resp.status_code == 403:
+            logger.warning("session-warmup strategy got 403")
+            return None
+        resp.raise_for_status()
+        return resp
+    except Exception:
+        logger.exception("session-warmup strategy failed")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+def resilient_get(url: str, *, timeout: int = 30,
+                  max_retries: int = 3) -> requests.Response:
+    """
+    Fetch *url* using layered bypass strategies with retries.
+
+    Returns a `requests.Response` on success.
+    Raises `requests.HTTPError` if all strategies and retries are exhausted.
+    """
+    strategies = [
+        ("cloudscraper", _try_cloudscraper),
+        ("curl_cffi", _try_curl_cffi),
+        ("session_warmup", _try_session_warmup),
+    ]
+
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        for name, fn in strategies:
+            try:
+                resp = fn(url, timeout=timeout)
+                if resp is not None:
+                    logger.info(f"Successfully fetched {url} via {name} "
+                                f"(attempt {attempt})")
+                    return resp
+            except Exception as exc:
+                last_error = exc
+                logger.warning(f"Strategy {name} failed on attempt {attempt}: "
+                               f"{type(exc).__name__}")
+
+        # Back off before next retry round (jittered exponential)
+        if attempt < max_retries:
+            backoff = min(2 ** attempt + random.uniform(0, 2), 15)
+            logger.info(f"All strategies failed on attempt {attempt}; "
+                        f"retrying in {backoff:.1f}s")
+            time.sleep(backoff)
+
+    # All retries exhausted
+    msg = f"All bypass strategies exhausted for {url} after {max_retries} attempts"
+    logger.error(msg)
+    if last_error:
+        raise requests.HTTPError(msg) from last_error
+    raise requests.HTTPError(msg)
+
+
+def resilient_get_pdf(url: str, *, timeout: int = 30,
+                      max_retries: int = 3) -> requests.Response:
+    """
+    Fetch a PDF URL with bypass strategies.
+
+    Same as `resilient_get` but adds PDF-specific Accept headers
+    and uses streaming where possible.
+    """
+    # For PDF downloads, the main anti-bot challenge is on the page fetch.
+    # S3 signed URLs typically don't block, so we use a simpler approach
+    # with full headers.
+    headers = _chrome_headers(url)
+    headers["Accept"] = "application/pdf,*/*;q=0.8"
+
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Try curl_cffi first for PDFs (best TLS fingerprint)
+            try:
+                from curl_cffi import requests as cffi_requests
+                resp = cffi_requests.get(
+                    url, headers=headers, timeout=timeout,
+                    verify=certifi.where(), impersonate="chrome131",
+                )
+                if resp.status_code != 403:
+                    resp.raise_for_status()
+                    logger.info(f"PDF fetched via curl_cffi (attempt {attempt})")
+                    return resp
+            except ImportError:
+                pass
+            except Exception:
+                logger.debug("curl_cffi PDF fetch failed, falling back")
+
+            # Fallback to plain requests with browser headers
+            resp = requests.get(url, headers=headers, timeout=timeout,
+                                verify=certifi.where(), stream=True)
+            resp.raise_for_status()
+            logger.info(f"PDF fetched via requests (attempt {attempt})")
+            return resp
+
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"PDF download attempt {attempt} failed: "
+                           f"{type(exc).__name__}")
+            if attempt < max_retries:
+                time.sleep(min(2 ** attempt + random.uniform(0, 1), 10))
+
+    msg = f"PDF download failed for {url} after {max_retries} attempts"
+    logger.error(msg)
+    if last_error:
+        raise requests.HTTPError(msg) from last_error
+    raise requests.HTTPError(msg)
