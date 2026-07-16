@@ -15,6 +15,7 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 - **Robust Storage:** Powered by **Supabase** (PostgreSQL) for resilient, structured tracking of subscribers and notices.
 - **Interactive Verification**: Includes an end-to-end `test_alert.py` testing script to instantly verify the scraper, Gemini API, and Telegram alerts.
 - **Memory Optimized Architecture:** Addresses glibc heap fragmentation in Docker via periodic `malloc_trim(0)` calls and tuned `MALLOC_MMAP_THRESHOLD_` / `MALLOC_TRIM_THRESHOLD_` environment variables, ensuring freed memory is returned to the OS. Also recycles the Supabase `httpx` connection pool every ~3 hours and uses stateless HTTP requests with strict context managers throughout.
+- **Multi-Strategy Anti-Bot Bypass:** Uses a layered HTTP client (`cloudscraper` → `curl_cffi` → session warmup) with rotated User-Agents, full browser-grade headers, TLS fingerprint impersonation, and cookie pre-warming to reliably bypass WAF/anti-bot protections on the Samarth eGov portal.
 
 ---
 
@@ -103,7 +104,8 @@ Interact with the bot on Telegram using:
 ```
 ├── bot/
 │   ├── utils/
-│   │   └── summarizer.py     # Gemini structured extraction and summary logic
+│   │   ├── summarizer.py     # Gemini structured extraction and summary logic
+│   │   └── http_client.py    # Multi-strategy resilient HTTP client (anti-bot bypass)
 │   ├── constants.py          # Categorization constants (Bhavanas, Depts)
 │   ├── handlers.py           # Telegram command and inline callback handlers
 │   ├── notice_processor.py   # Scraper, target-filtering, and alert coordinator for notices
@@ -147,7 +149,7 @@ The codebase has been hardened against the following:
 | Callback origin | Every Telegram inline callback validates `from_user.id == chat.id` before processing account-level actions. |
 | Callback data | All integer values parsed from callback payloads are wrapped in `try/except` with explicit bounds checks for page indices. |
 | URL allowlist | Outbound requests are restricted to `visvabharati.ac.in`, `visvabharati.samarth.edu.in`, and the exact S3 bucket `samarth-ac.s3.ap-south-1.amazonaws.com`. |
-| TLS | All outbound HTTP requests use `certifi` for certificate verification. |
+| TLS | All outbound HTTP requests use `certifi` for certificate verification. `curl_cffi` impersonates Chrome's TLS fingerprint (JA3) for stealth. |
 | Memory | In-memory user caches use `TTLCache(maxsize=10_000, ttl=7200)` to prevent unbounded growth. |
 | Markdown injection | User-supplied names are sanitized and then escaped before insertion into Markdown messages. |
 | Logging | All `except` blocks use `logger.exception()` to capture full stack traces. |

@@ -7,6 +7,8 @@ from bs4 import BeautifulSoup
 import time
 from urllib.parse import urlparse
 
+from bot.utils.http_client import resilient_get, resilient_get_pdf
+
 from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError, NoticeExtraction
 from bot.storage import SupabaseStorage
 
@@ -42,65 +44,55 @@ class NoticeProcessor:
         existing_titles = existing_titles or set()
         existing_urls = existing_urls or set()
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        }
+        try:
+            response = resilient_get(self.website_url, timeout=30,
+                                     max_retries=max_retries)
+            soup = BeautifulSoup(response.content, 'html.parser')
 
-        for attempt in range(max_retries):
-            try:
-                with requests.get(self.website_url, headers=headers, timeout=30, verify=certifi.where()) as response:
-                    response.raise_for_status()
-                    soup = BeautifulSoup(response.content, 'html.parser')
+            notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
+            if not notice_boxes:
+                page_title = soup.title.string.strip() if soup.title and soup.title.string else "No Title"
+                logger.error(f"Could not find any an-noticebox divs. Status: {response.status_code} | Page Title: {page_title}")
+                return []
 
-                notice_boxes = soup.find_all('div', {'class': 'an-noticebox'})
-                if not notice_boxes:
-                    page_title = soup.title.string.strip() if soup.title and soup.title.string else "No Title"
-                    logger.error(f"Could not find any an-noticebox divs. Status: {response.status_code} | Page Title: {page_title}")
-                    if attempt < max_retries - 1:
-                        time.sleep(5)
+            new_notices = []
+            logger.info(f"Using {len(existing_urls)} existing notice records for deduplication.")
+
+            for box in notice_boxes[:10]:
+                notice_text_div = box.find('div', {'class': 'NoticeText'})
+                if not notice_text_div:
                     continue
-
-                new_notices = []
-                logger.info(f"Using {len(existing_urls)} existing notice records for deduplication.")
-
-                for box in notice_boxes[:10]:
-                    notice_text_div = box.find('div', {'class': 'NoticeText'})
-                    if not notice_text_div:
-                        continue
-                    anchor = notice_text_div.find('a')
-                    if not anchor:
-                        continue
-                        
-                    notice_title = anchor.text.strip()
-                    notice_link = anchor['href'].strip()
+                anchor = notice_text_div.find('a')
+                if not anchor:
+                    continue
                     
-                    date_div = box.find('div', {'class': 'noticeDate'})
-                    notice_date = None
-                    if date_div:
-                        date_string = ' '.join(date_div.text.split())
-                        try:
-                            notice_date = datetime.datetime.strptime(date_string, '%b %d %Y')
-                        except ValueError:
-                            logger.exception(f"Could not parse date: {date_string}")
+                notice_title = anchor.text.strip()
+                notice_link = anchor['href'].strip()
+                
+                date_div = box.find('div', {'class': 'noticeDate'})
+                notice_date = None
+                if date_div:
+                    date_string = ' '.join(date_div.text.split())
+                    try:
+                        notice_date = datetime.datetime.strptime(date_string, '%b %d %Y')
+                    except ValueError:
+                        logger.exception(f"Could not parse date: {date_string}")
 
-                    if notice_link not in existing_urls and notice_title not in existing_titles:
-                        new_notices.append({
-                            'title': notice_title,
-                            'link': notice_link,
-                            'date': notice_date
-                        })
+                if notice_link not in existing_urls and notice_title not in existing_titles:
+                    new_notices.append({
+                        'title': notice_title,
+                        'link': notice_link,
+                        'date': notice_date
+                    })
 
-                # Free memory
-                del notice_boxes
-                del soup
+            # Free memory
+            del notice_boxes
+            del soup
 
-                return new_notices
+            return new_notices
 
-            except Exception:
-                logger.exception(f"Error scraping notices (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    time.sleep(5)
+        except Exception:
+            logger.exception("Error scraping notices after all bypass strategies")
                 
         return []
 
@@ -109,43 +101,34 @@ class NoticeProcessor:
             logger.error(f"Unsafe or unauthorized URL requested: {pdf_url}")
             return None
 
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
+        try:
+            response = resilient_get_pdf(pdf_url, timeout=30,
+                                         max_retries=max_retries)
 
-        for attempt in range(max_retries):
-            try:
-                with requests.get(pdf_url, headers=headers, timeout=30, verify=certifi.where(), stream=True) as response:
-                    response.raise_for_status()
-                    content_length = int(response.headers.get('content-length', 0))
-                    if content_length > self.MAX_PDF_SIZE:
-                        logger.error(f"PDF too large: {content_length} bytes")
-                        return None
+            content_length = int(response.headers.get('content-length', 0))
+            if content_length > self.MAX_PDF_SIZE:
+                logger.error(f"PDF too large: {content_length} bytes")
+                return None
 
-                    if not response.headers.get('content-type', '').startswith('application/pdf'):
-                        logger.error("Downloaded file is not a PDF")
-                        return None
+            content = response.content
 
-                    chunks = []
-                    downloaded = 0
-                    for chunk in response.iter_content(chunk_size=8192):
-                        downloaded += len(chunk)
-                        if downloaded > self.MAX_PDF_SIZE:
-                            logger.error("PDF exceeds size limit during download")
-                            return None
-                        chunks.append(chunk)
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('application/pdf') and b'%PDF-' not in content[:50]:
+                logger.error("Downloaded file is not a PDF")
+                return None
 
-                    content = b''.join(chunks)
-                    if len(content) < 100:
-                        logger.error("Downloaded PDF file is too small")
-                        return None
+            if len(content) > self.MAX_PDF_SIZE:
+                logger.error("PDF exceeds size limit")
+                return None
 
-                    return content
+            if len(content) < 100:
+                logger.error("Downloaded PDF file is too small")
+                return None
 
-            except Exception:
-                logger.exception(f"PDF download error (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    time.sleep(5)
+            return content
+
+        except Exception:
+            logger.exception(f"PDF download failed after all strategies")
 
         return None
 
