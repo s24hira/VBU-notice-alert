@@ -52,6 +52,7 @@ from bot.handlers import BotHandlers
 from bot.notice_processor import NoticeProcessor
 from bot.result_processor import ResultProcessor
 from bot.utils.summarizer import GeminiPDFSummarizer
+from bot.utils.http_client import reset_sessions
 
 # Configure logging
 import sys
@@ -95,34 +96,74 @@ class VBUNoticeBot:
         except Exception as e:
             logger.error(f"Error resetting webhook: {type(e).__name__}")
 
-    def run(self):
-        try:
-            self.reset_webhook()
-            
-            # Start Telegram bot polling in a separate thread
-            polling_thread = threading.Thread(target=self.bot.infinity_polling, kwargs={'timeout': 30, 'long_polling_timeout': 90})
-            polling_thread.daemon = True
-            polling_thread.start()
-            logger.info("Bot infinity_polling started in separate thread")
-            logger.info("Starting main loop")
-            
-            # Initial run
-            try:
-                logger.info("Starting initial notice and result check")
-                existing_titles, existing_urls = self.storage.get_existing_notices()
-                self.notice_processor.process_new_notices(self.bot, existing_titles, existing_urls)
-                self.result_processor.process_new_results(self.bot, existing_titles, existing_urls)
-            except Exception as e:
-                logger.error(f"Error in initial check: {type(e).__name__}")
+    def _run_initial_check(self):
+        """Run the first notice/result scrape in a background thread.
 
+        Keeping this off the main thread means the polling thread is never
+        starved during startup — bot commands are responsive immediately.
+        """
+        # Give infinity_polling a couple of seconds to fully establish its
+        # long-poll connection before we saturate the network/DB with the
+        # initial scrape.
+        time.sleep(2)
+        try:
+            logger.info("Starting initial notice and result check (background thread)")
+            existing_titles, existing_urls = self.storage.get_existing_notices()
+            self.notice_processor.process_new_notices(self.bot, existing_titles, existing_urls)
+            self.result_processor.process_new_results(self.bot, existing_titles, existing_urls)
+        except Exception as e:
+            logger.error(f"Error in initial check: {type(e).__name__}")
+        finally:
             release_memory()
             logger.info(f"Initial RSS after GC: {get_rss_mb()} MB")
+
+    def run(self):
+        try:
+            webhook_url = os.getenv('WEBHOOK_URL')
+            if webhook_url:
+                # Webhook mode
+                logger.info(f"Starting in Webhook mode (URL: {webhook_url})")
+                try:
+                    self.bot.delete_webhook()
+                    time.sleep(0.5)
+                    full_webhook_url = webhook_url if webhook_url.endswith('/webhook') else webhook_url.rstrip('/') + '/webhook'
+                    self.bot.set_webhook(url=full_webhook_url)
+                    logger.info("Webhook set successfully")
+                except Exception as e:
+                    logger.error(f"Error setting webhook: {e}")
+            else:
+                # Polling mode
+                logger.info("Starting in Polling mode")
+                self.reset_webhook()
+    
+                # Start Telegram bot polling in a separate thread.
+                # long_polling_timeout=20 is the standard value recommended by the
+                # Telegram Bot API docs.
+                polling_thread = threading.Thread(
+                    target=self.bot.infinity_polling,
+                    kwargs={'timeout': 25, 'long_polling_timeout': 20},
+                    name='polling',
+                )
+                polling_thread.daemon = True
+                polling_thread.start()
+                logger.info("Bot infinity_polling started in separate thread")
+
+            # Run the initial scrape in its own daemon thread so that the
+            # polling thread (and therefore all bot commands) are never blocked.
+            initial_check_thread = threading.Thread(
+                target=self._run_initial_check,
+                name='initial_check',
+                daemon=True,
+            )
+            initial_check_thread.start()
+            logger.info("Initial check dispatched to background thread")
+            logger.info("Starting main loop")
 
             while True:
                 next_interval = random.randint(600, 1200)  # 10-20 minutes
                 logger.info(f"Next check in {next_interval}s | RSS: {get_rss_mb()} MB")
                 time.sleep(next_interval)
-                
+
                 try:
                     existing_titles, existing_urls = self.storage.get_existing_notices()
                     self.notice_processor.process_new_notices(self.bot, existing_titles, existing_urls)
@@ -138,6 +179,9 @@ class VBUNoticeBot:
                     logger.info("Recycling Supabase client connection pool")
                     self.storage.reconnect()
 
+                    logger.info("Recycling HTTP client connection pools")
+                    reset_sessions()
+
                 # Force glibc to return freed memory to OS
                 release_memory()
                 logger.info(f"Post-GC RSS: {get_rss_mb()} MB")
@@ -146,42 +190,59 @@ class VBUNoticeBot:
             logger.error(f"Error in main loop: {type(e).__name__}")
             raise
 
-class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
-    """Minimal HTTP handler for Koyeb TCP health checks.
+def make_handler(bot_instance):
+    class WebhookAndHealthCheckHandler(http.server.BaseHTTPRequestHandler):
+        """HTTP handler for Koyeb TCP health checks and Telegram Webhooks.
+    
+        Responds 200 OK to GET / and GET /health.
+        Receives Telegram updates on POST /webhook.
+        """
+        def do_GET(self):
+            if self.path in ('/', '/health'):
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(b'OK')
+            else:
+                self.send_response(404)
+                self.end_headers()
+                
+        def do_POST(self):
+            if self.path == '/webhook':
+                content_length = int(self.headers.get('Content-Length', 0))
+                post_data = self.rfile.read(content_length).decode('utf-8')
+                
+                try:
+                    update = telebot.types.Update.de_json(post_data)
+                    bot_instance.bot.process_new_updates([update])
+                    self.send_response(200)
+                    self.end_headers()
+                except Exception as e:
+                    logger.error(f"Error processing webhook update: {e}")
+                    self.send_response(500)
+                    self.end_headers()
+            else:
+                self.send_response(404)
+                self.end_headers()
+    
+        def log_message(self, format, *args):
+            # Suppress per-request access logs to keep stdout clean
+            pass
+            
+    return WebhookAndHealthCheckHandler
 
-    Deliberately uses BaseHTTPRequestHandler to prevent static-file serving
-    from the container's working directory.
-    Only responds 200 OK to GET /  and GET /health; everything else is 404.
-    """
-    def do_GET(self):
-        if self.path in ('/', '/health'):
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/plain; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(b'OK')
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        # Suppress per-request access logs to keep stdout clean
-        pass
-
-def start_health_server(port=8000):
+def start_server(bot_instance, port=8000):
     socketserver.TCPServer.allow_reuse_address = True
+    handler_class = make_handler(bot_instance)
     try:
-        with socketserver.TCPServer(("", port), HealthCheckHandler) as httpd:
-            logger.info(f"Health check server listening on port {port}")
+        with socketserver.TCPServer(("", port), handler_class) as httpd:
+            logger.info(f"Health check and webhook server listening on port {port}")
             httpd.serve_forever()
     except Exception as e:
-        logger.error(f"Failed to start health check server: {e}")
+        logger.error(f"Failed to start server: {e}")
 
 def main():
     logger.info("Starting Visva-Bharati Notice Bot application...")
-    
-    # Start the health check server in a background thread
-    health_thread = threading.Thread(target=start_health_server, kwargs={'port': 8000}, daemon=True)
-    health_thread.start()
     
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN environment variable not set")
@@ -194,6 +255,11 @@ def main():
         return
         
     bot = VBUNoticeBot()
+    
+    # Start the health/webhook server in a background thread
+    server_thread = threading.Thread(target=start_server, args=(bot,), kwargs={'port': 8000}, daemon=True)
+    server_thread.start()
+
     bot.run()
 
 if __name__ == '__main__':

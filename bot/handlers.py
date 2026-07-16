@@ -25,10 +25,10 @@ class BotHandlers:
     def __init__(self, bot, storage):
         self.bot = bot
         self.storage = storage
-        self._rate_limit = defaultdict(list)
+        self._rate_limit = TTLCache(maxsize=10_000, ttl=60)
         self._known_users = set()
-        self._user_is_existing = {}
-        self._setup_state = {}
+        self._user_is_existing = TTLCache(maxsize=10_000, ttl=7200)
+        self._setup_state = TTLCache(maxsize=1_000, ttl=600)
         # Bounded TTL caches — prevent unbounded memory growth over time.
         # Entries expire after 2 hours; at most 10 000 concurrent users cached.
         self._user_cache = TTLCache(maxsize=10_000, ttl=7200)
@@ -36,25 +36,34 @@ class BotHandlers:
 
     def _is_rate_limited(self, chat_id, max_calls=5, window_seconds=60):
         now = time.time()
-        timestamps = self._rate_limit[chat_id]
-        # Purge old entries
-        self._rate_limit[chat_id] = [t for t in timestamps if now - t < window_seconds]
-        if len(self._rate_limit[chat_id]) >= max_calls:
-            return True
-        self._rate_limit[chat_id].append(now)
+        if chat_id in self._rate_limit:
+            count, window_start = self._rate_limit[chat_id]
+            if now - window_start < window_seconds:
+                if count >= max_calls:
+                    return True
+                self._rate_limit[chat_id] = (count + 1, window_start)
+                return False
+                
+        self._rate_limit[chat_id] = (1, now)
         return False
 
     def ensure_user(self, func):
         @wraps(func)
         def wrapper(message):
+            import threading
             user_id = message.chat.id
             if self._is_rate_limited(user_id):
                 logger.warning(f"User {user_id} rate limited.")
                 return
             if user_id not in self._known_users:
                 username = message.from_user.username
-                if self.storage.add_user(user_id, username):
-                    logger.info(f"New user {user_id} added from {func.__name__}.")
+                
+                # Fire and forget: add user to DB in the background so it doesn't block the UI
+                def _bg_add():
+                    if self.storage.add_user(user_id, username):
+                        logger.info(f"New user {user_id} added from {func.__name__}.")
+                
+                threading.Thread(target=_bg_add, daemon=True).start()
                 self._known_users.add(user_id)
             return func(message)
         return wrapper

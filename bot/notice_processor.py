@@ -19,7 +19,7 @@ class NoticeProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
-        self.MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
+        self.MAX_PDF_SIZE = 10 * 1024 * 1024  # 10 MB
         self.ALLOWED_DOMAINS = [
             'visvabharati.ac.in',
             'visvabharati.samarth.edu.in',
@@ -114,7 +114,8 @@ class NoticeProcessor:
 
             content_type = response.headers.get('content-type', '')
             if not content_type.startswith('application/pdf') and b'%PDF-' not in content[:50]:
-                logger.error("Downloaded file is not a PDF")
+                preview = content[:50].decode('utf-8', errors='ignore').replace('\n', ' ')
+                logger.error(f"Downloaded file is not a PDF. Content-Type: {content_type} | Preview: {preview}")
                 return None
 
             if len(content) > self.MAX_PDF_SIZE:
