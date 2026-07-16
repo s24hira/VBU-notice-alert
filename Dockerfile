@@ -32,6 +32,7 @@ EXPOSE 8000
 # MALLOC_MMAP_THRESHOLD_: Allocations >128KB use mmap (freed instantly on free()).
 ENV MALLOC_TRIM_THRESHOLD_=65536
 ENV MALLOC_MMAP_THRESHOLD_=131072
+ENV MALLOC_ARENA_MAX=2
 
 # Run main.py when the container launches
 CMD ["python", "main.py"]

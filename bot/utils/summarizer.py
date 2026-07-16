@@ -233,28 +233,9 @@ class GeminiPDFSummarizer:
             "x-goog-api-key": self.api_key
         }
 
-    def summarize_pdf(self, pdf_bytes, max_retries=5, backoff_factor=5) -> NoticeExtraction:
-        """
-        Summarize a PDF and extract target audience parameters.
-        Returns a NoticeExtraction pydantic object.
-        """
-        import time
-        prompt = """
-        Analyze the provided Visva-Bharati notice PDF. The core vision for categorization is: "Does it impact the student, and if yes, which category (Bhavana/Department) is it impacting?"
-        Extract the following information:
-        1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
-        2. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
-           - IMPORTANT: If a notice is issued by the central office but involves actions/interests specific to a particular Institute/Department's students, set target_bhavana to that specific Institute, NOT the Central Office.
-        3. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
-           - IMPORTANT: For joining notices, you MUST identify and set the target_department (and target_bhavana if applicable) for which the employee is joining.
-        4. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular institutes/departments.
-           - IMPORTANT: If a notice is issued by the central office but involves actions/interests for ALL university students, MUST set is_general to true.
-           - IMPORTANT: For joining notices, DO NOT classify it as a general notice (is_general MUST be false), and ensure the specific department is identified.
-        """
-
+        # Pre-compute Gemini schema
         schema = NoticeExtraction.model_json_schema()
-        # Ensure proper schema formatting for Gemini API (passing enums and nullable attributes)
-        gemini_schema = {
+        self._gemini_schema = {
             "type": "OBJECT",
             "properties": {},
             "required": schema.get("required", [])
@@ -279,8 +260,27 @@ class GeminiPDFSummarizer:
             elif "enum" in prop_details:
                 prop_schema["enum"] = prop_details["enum"]
                 
-            gemini_schema["properties"][prop_name] = prop_schema
-            
+            self._gemini_schema["properties"][prop_name] = prop_schema
+
+    def summarize_pdf(self, pdf_bytes, max_retries=5, backoff_factor=5) -> NoticeExtraction:
+        """
+        Summarize a PDF and extract target audience parameters.
+        Returns a NoticeExtraction pydantic object.
+        """
+        import time
+        prompt = """
+        Analyze the provided Visva-Bharati notice PDF. The core vision for categorization is: "Does it impact the student, and if yes, which category (Bhavana/Department) is it impacting?"
+        Extract the following information:
+        1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
+        2. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
+           - IMPORTANT: If a notice is issued by the central office but involves actions/interests specific to a particular Institute/Department's students, set target_bhavana to that specific Institute, NOT the Central Office.
+        3. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
+           - IMPORTANT: For joining notices, you MUST identify and set the target_department (and target_bhavana if applicable) for which the employee is joining.
+        4. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular institutes/departments.
+           - IMPORTANT: If a notice is issued by the central office but involves actions/interests for ALL university students, MUST set is_general to true.
+           - IMPORTANT: For joining notices, DO NOT classify it as a general notice (is_general MUST be false), and ensure the specific department is identified.
+        """
+
         b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
         payload = {
             "contents": [
@@ -300,31 +300,35 @@ class GeminiPDFSummarizer:
             ],
             "generationConfig": {
                 "response_mime_type": "application/json",
-                "response_schema": gemini_schema
+                "response_schema": self._gemini_schema
             }
         }
+        del b64_pdf  # Free memory immediately
 
-        for attempt in range(max_retries):
-            try:
-                logging.info(f"Generating summary and categorization from in-memory PDF content (attempt {attempt + 1}/{max_retries})...")
-                with requests.post(self.url, headers=self._headers, json=payload) as response:
-                    response.raise_for_status()
+        try:
+            for attempt in range(max_retries):
+                try:
+                    logging.info(f"Generating summary and categorization from in-memory PDF content (attempt {attempt + 1}/{max_retries})...")
+                    with requests.post(self.url, headers=self._headers, json=payload) as response:
+                        response.raise_for_status()
+                        
+                        response_data = response.json()
+                    text_result = response_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                     
-                    response_data = response.json()
-                text_result = response_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                
-                if not text_result:
-                    raise SummarizationError("Empty response from Gemini API.")
-                    
-                return NoticeExtraction.model_validate_json(text_result)
+                    if not text_result:
+                        raise SummarizationError("Empty response from Gemini API.")
+                        
+                    return NoticeExtraction.model_validate_json(text_result)
 
-            except Exception as e:
-                logging.error(f"Error in Gemini summarization (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    sleep_time = backoff_factor * (2 ** attempt)
-                    logging.info(f"Retrying in {sleep_time} seconds...")
-                    time.sleep(sleep_time)
-                else:
-                    raise SummarizationError(f"Failed to generate structured summary from Gemini after {max_retries} attempts.")
+                except Exception as e:
+                    logging.error(f"Error in Gemini summarization (attempt {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        sleep_time = backoff_factor * (2 ** attempt)
+                        logging.info(f"Retrying in {sleep_time} seconds...")
+                        time.sleep(sleep_time)
+                    else:
+                        raise SummarizationError(f"Failed to generate structured summary from Gemini after {max_retries} attempts.")
 
-        raise SummarizationError("An unexpected error occurred during PDF processing.")
+            raise SummarizationError("An unexpected error occurred during PDF processing.")
+        finally:
+            del payload

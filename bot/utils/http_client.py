@@ -17,11 +17,37 @@ complete set of headers that match a real Chrome browser.
 import logging
 import random
 import time
+import threading
 
 import certifi
 import requests
 
 logger = logging.getLogger(__name__)
+
+_cloudscraper_lock = threading.Lock()
+_cloudscraper_instance = None
+
+_warmup_session_lock = threading.Lock()
+_warmup_session = None
+
+def reset_sessions():
+    """Reset the underlying HTTP sessions to clear connection pools and memory."""
+    global _cloudscraper_instance, _warmup_session
+    with _cloudscraper_lock:
+        if _cloudscraper_instance is not None:
+            try:
+                _cloudscraper_instance.close()
+            except Exception:
+                pass
+            _cloudscraper_instance = None
+
+    with _warmup_session_lock:
+        if _warmup_session is not None:
+            try:
+                _warmup_session.close()
+            except Exception:
+                pass
+            _warmup_session = None
 
 # ---------------------------------------------------------------------------
 # User-Agent pool – rotated on every request
@@ -79,6 +105,7 @@ def _chrome_headers(url: str, ua: str | None = None) -> dict:
 # ---------------------------------------------------------------------------
 def _try_cloudscraper(url: str, timeout: int = 30) -> requests.Response | None:
     """Use cloudscraper to bypass Cloudflare / JS-challenge protections."""
+    global _cloudscraper_instance
     try:
         import cloudscraper
     except ImportError:
@@ -86,13 +113,17 @@ def _try_cloudscraper(url: str, timeout: int = 30) -> requests.Response | None:
         return None
 
     try:
-        scraper = cloudscraper.create_scraper(
-            browser={
-                "browser": "chrome",
-                "platform": "windows",
-                "desktop": True,
-            },
-        )
+        with _cloudscraper_lock:
+            if _cloudscraper_instance is None:
+                _cloudscraper_instance = cloudscraper.create_scraper(
+                    browser={
+                        "browser": "chrome",
+                        "platform": "windows",
+                        "desktop": True,
+                    },
+                )
+            scraper = _cloudscraper_instance
+            
         # Overlay our realistic headers on top of cloudscraper's defaults
         headers = _chrome_headers(url)
         scraper.headers.update(headers)
@@ -100,6 +131,7 @@ def _try_cloudscraper(url: str, timeout: int = 30) -> requests.Response | None:
         resp = scraper.get(url, timeout=timeout, verify=certifi.where())
         if resp.status_code == 403:
             logger.warning("cloudscraper got 403 – will try next strategy")
+            resp.close()
             return None
         resp.raise_for_status()
         return resp
@@ -130,6 +162,10 @@ def _try_curl_cffi(url: str, timeout: int = 30) -> requests.Response | None:
         )
         if resp.status_code == 403:
             logger.warning("curl_cffi got 403 – will try next strategy")
+            try:
+                resp.close()
+            except AttributeError:
+                pass
             return None
         resp.raise_for_status()
         return resp
@@ -147,27 +183,37 @@ def _try_session_warmup(url: str, timeout: int = 30) -> requests.Response | None
       1. Hit the root domain to collect cookies / pass server-side checks.
       2. Then request the target URL with the populated cookie jar.
     """
+    global _warmup_session
     try:
         from urllib.parse import urlparse
         parsed = urlparse(url)
         root_url = f"{parsed.scheme}://{parsed.netloc}/"
 
-        session = requests.Session()
+        with _warmup_session_lock:
+            if _warmup_session is None:
+                _warmup_session = requests.Session()
+                needs_warmup = True
+            else:
+                needs_warmup = False
+            session = _warmup_session
+
         ua = _pick_ua()
         headers = _chrome_headers(url, ua=ua)
         session.headers.update(headers)
 
-        # Step 1 – warm-up: hit root to acquire session cookies / CSRF
-        try:
-            warmup = session.get(root_url, timeout=15, verify=certifi.where(),
-                                 allow_redirects=True)
-            logger.debug(f"Warmup status: {warmup.status_code}, "
-                         f"cookies: {len(session.cookies)}")
-        except Exception:
-            logger.debug("Warmup request failed – continuing anyway")
+        if needs_warmup:
+            # Step 1 – warm-up: hit root to acquire session cookies / CSRF
+            try:
+                warmup = session.get(root_url, timeout=15, verify=certifi.where(),
+                                     allow_redirects=True)
+                logger.debug(f"Warmup status: {warmup.status_code}, "
+                             f"cookies: {len(session.cookies)}")
+                warmup.close()
+            except Exception:
+                logger.debug("Warmup request failed – continuing anyway")
 
-        # Small human-like pause
-        time.sleep(random.uniform(0.5, 1.5))
+            # Small human-like pause
+            time.sleep(random.uniform(0.5, 1.5))
 
         # Step 2 – now request the actual page with cookies
         # Update referer to look like an internal navigation
@@ -178,6 +224,7 @@ def _try_session_warmup(url: str, timeout: int = 30) -> requests.Response | None
                            allow_redirects=True)
         if resp.status_code == 403:
             logger.warning("session-warmup strategy got 403")
+            resp.close()
             return None
         resp.raise_for_status()
         return resp

@@ -19,7 +19,7 @@ class ResultProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
-        self.MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
+        self.MAX_PDF_SIZE = 10 * 1024 * 1024  # 10 MB
         self.ALLOWED_DOMAINS = [
             'visvabharati.ac.in',
             'visvabharati.samarth.edu.in',
@@ -221,6 +221,12 @@ PDF Link: {result['link']}
 
                 except Exception:
                     logger.exception("Result processing error")
+                finally:
+                    # Clear memory for each result processed
+                    if 'pdf_bytes' in locals():
+                        del pdf_bytes
+                    if 'extraction' in locals():
+                        del extraction
 
         except Exception:
             logger.exception("Error in process_new_results")

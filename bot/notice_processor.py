@@ -19,7 +19,7 @@ class NoticeProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
-        self.MAX_PDF_SIZE = 50 * 1024 * 1024  # 50 MB
+        self.MAX_PDF_SIZE = 10 * 1024 * 1024  # 10 MB
         self.ALLOWED_DOMAINS = [
             'visvabharati.ac.in',
             'visvabharati.samarth.edu.in',

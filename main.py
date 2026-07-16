@@ -52,6 +52,7 @@ from bot.handlers import BotHandlers
 from bot.notice_processor import NoticeProcessor
 from bot.result_processor import ResultProcessor
 from bot.utils.summarizer import GeminiPDFSummarizer
+from bot.utils.http_client import reset_sessions
 
 # Configure logging
 import sys
@@ -163,6 +164,9 @@ class VBUNoticeBot:
                 if self._check_count % 6 == 0:
                     logger.info("Recycling Supabase client connection pool")
                     self.storage.reconnect()
+
+                    logger.info("Recycling HTTP client connection pools")
+                    reset_sessions()
 
                 # Force glibc to return freed memory to OS
                 release_memory()
