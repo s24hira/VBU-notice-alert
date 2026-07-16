@@ -50,14 +50,20 @@ class BotHandlers:
     def ensure_user(self, func):
         @wraps(func)
         def wrapper(message):
+            import threading
             user_id = message.chat.id
             if self._is_rate_limited(user_id):
                 logger.warning(f"User {user_id} rate limited.")
                 return
             if user_id not in self._known_users:
                 username = message.from_user.username
-                if self.storage.add_user(user_id, username):
-                    logger.info(f"New user {user_id} added from {func.__name__}.")
+                
+                # Fire and forget: add user to DB in the background so it doesn't block the UI
+                def _bg_add():
+                    if self.storage.add_user(user_id, username):
+                        logger.info(f"New user {user_id} added from {func.__name__}.")
+                
+                threading.Thread(target=_bg_add, daemon=True).start()
                 self._known_users.add(user_id)
             return func(message)
         return wrapper
