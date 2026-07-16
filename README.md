@@ -15,6 +15,7 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 - **Robust Storage:** Powered by **Supabase** (PostgreSQL) for resilient, structured tracking of subscribers and notices.
 - **Interactive Verification**: Includes an end-to-end `test_alert.py` testing script to instantly verify the scraper, Gemini API, and Telegram alerts.
 - **Memory Optimized Architecture:** Addresses glibc heap fragmentation in Docker via periodic `malloc_trim(0)` calls and tuned `MALLOC_MMAP_THRESHOLD_` / `MALLOC_TRIM_THRESHOLD_` environment variables, ensuring freed memory is returned to the OS. Also recycles the Supabase `httpx` connection pool every ~3 hours and uses stateless HTTP requests with strict context managers throughout.
+- **Non-Blocking Startup:** The initial notice/result scrape runs in its own daemon thread so the Telegram polling thread is never blocked. Bot commands respond instantly from the first second of deployment. `long_polling_timeout` is set to the Telegram-recommended 20 s (was incorrectly set to 90 s, which caused ~1-minute delays on first command).
 - **Multi-Strategy Anti-Bot Bypass:** Uses a layered HTTP client (`cloudscraper` → `curl_cffi` → session warmup) with rotated User-Agents, full browser-grade headers, TLS fingerprint impersonation, and cookie pre-warming to reliably bypass WAF/anti-bot protections on the Samarth eGov portal.
 
 ---

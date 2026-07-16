@@ -114,7 +114,8 @@ class NoticeProcessor:
 
             content_type = response.headers.get('content-type', '')
             if not content_type.startswith('application/pdf') and b'%PDF-' not in content[:50]:
-                logger.error("Downloaded file is not a PDF")
+                preview = content[:50].decode('utf-8', errors='ignore').replace('\n', ' ')
+                logger.error(f"Downloaded file is not a PDF. Content-Type: {content_type} | Preview: {preview}")
                 return None
 
             if len(content) > self.MAX_PDF_SIZE:
