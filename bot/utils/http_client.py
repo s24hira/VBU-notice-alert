@@ -330,7 +330,8 @@ def resilient_download_file(url: str, *, timeout: int = 30,
                     "headers": headers,
                     "timeout": timeout,
                     "verify": certifi.where(),
-                    "impersonate": "chrome131"
+                    "impersonate": "chrome131",
+                    "stream": True
                 }
                 if proxies:
                     kwargs["proxies"] = proxies
@@ -338,9 +339,20 @@ def resilient_download_file(url: str, *, timeout: int = 30,
                 resp = cffi_requests.get(url, **kwargs)
                 resp.raise_for_status()
                 
-                # Check size post-download for curl_cffi since older versions don't stream well
-                if len(resp.content) > max_size:
-                    raise ValueError(f"File exceeds maximum allowed size of {max_size} bytes")
+                content = bytearray()
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        content.extend(chunk)
+                        if len(content) > max_size:
+                            raise ValueError(f"File exceeds maximum allowed size of {max_size} bytes")
+                
+                # Mock the content property for downstream consumers
+                resp._content = bytes(content)
+                # Some curl_cffi versions might use content property setter differently, so we ensure it's accessible
+                try:
+                    resp.content = bytes(content)
+                except AttributeError:
+                    pass
                     
                 logger.info(f"File fetched via curl_cffi fallback (attempt {attempt})")
                 return resp

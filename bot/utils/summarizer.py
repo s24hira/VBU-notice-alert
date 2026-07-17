@@ -2,6 +2,7 @@ import os
 import base64
 import requests
 import json
+import threading
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional, Literal
 import logging
@@ -169,13 +170,16 @@ class NoticeExtraction(BaseModel):
     @field_validator('target_bhavana', mode='before')
     @classmethod
     def validate_bhavana(cls, v):
-        if not v or (isinstance(v, str) and v.lower() == 'null'):
+        if not v:
             return None
         if not isinstance(v, str):
             return None
         
         v_clean = v.strip()
         v_lower = v_clean.lower()
+        
+        if v_lower in ('none', 'null', 'n/a', 'not applicable', 'unknown'):
+            return None
         
         if v_lower in BHAVANA_ALIASES:
             return BHAVANA_ALIASES[v_lower]
@@ -190,13 +194,16 @@ class NoticeExtraction(BaseModel):
     @field_validator('target_department', mode='before')
     @classmethod
     def validate_department(cls, v):
-        if not v or (isinstance(v, str) and v.lower() == 'null'):
+        if not v:
             return None
         if not isinstance(v, str):
             return None
             
         v_clean = v.strip()
         v_lower = v_clean.lower()
+        
+        if v_lower in ('none', 'null', 'n/a', 'not applicable', 'unknown'):
+            return None
         
         if v_lower in DEPARTMENT_ALIASES:
             return DEPARTMENT_ALIASES[v_lower]
@@ -228,6 +235,7 @@ class GeminiPDFSummarizer:
         self.api_key = api_key
         self.models = ['gemini-3.5-flash', 'gemini-3-flash-preview']
         self.current_model_index = 0
+        self._model_lock = threading.Lock()
         self._headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": self.api_key
@@ -263,8 +271,9 @@ class GeminiPDFSummarizer:
             self._gemini_schema["properties"][prop_name] = prop_schema
 
     def _get_next_url(self):
-        model = self.models[self.current_model_index]
-        self.current_model_index = (self.current_model_index + 1) % len(self.models)
+        with self._model_lock:
+            model = self.models[self.current_model_index]
+            self.current_model_index = (self.current_model_index + 1) % len(self.models)
         return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
     def summarize_document(self, file_bytes, mime_type="application/pdf", max_retries=5, backoff_factor=5) -> NoticeExtraction:

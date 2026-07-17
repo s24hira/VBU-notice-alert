@@ -172,10 +172,15 @@ class ResultProcessor:
         for user_id in user_ids:
             try:
                 date_str = result['date'].strftime('%b %d, %Y') if isinstance(result.get('date'), datetime.date) else "N/A"
+                
+                safe_title = result['title']
+                if len(safe_title) > 2000:
+                    safe_title = safe_title[:2000] + "..."
+
                 alert_message = f"""
 🚨Examination Result!🚨
 
-Title: {result['title']}
+Title: {safe_title}
 
 Date: {date_str}
 
@@ -184,10 +189,14 @@ Link: {result['link']}
                 bot.send_message(user_id, alert_message)
 
                 if summary_text:
+                    safe_summary = summary_text
+                    if len(safe_summary) > 3900:
+                        safe_summary = safe_summary[:3900] + "..."
+                        
                     summary_message = f"""
 ✨ AI Summary:
 
-{summary_text}
+{safe_summary}
                     """
                     bot.send_message(user_id, summary_message)
 

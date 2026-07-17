@@ -149,10 +149,15 @@ class NoticeProcessor:
         for user_id in user_ids:
             try:
                 date_str = notice['date'].strftime('%b %d, %Y') if isinstance(notice.get('date'), datetime.date) else "N/A"
+                
+                safe_title = notice['title']
+                if len(safe_title) > 2000:
+                    safe_title = safe_title[:2000] + "..."
+
                 alert_message = f"""
 🚨New Visva-Bharati Notice!🚨
 
-Title: {notice['title']}
+Title: {safe_title}
 
 Date: {date_str}
 
@@ -161,10 +166,14 @@ Link: {notice['link']}
                 bot.send_message(user_id, alert_message)
 
                 if summary_text:
+                    safe_summary = summary_text
+                    if len(safe_summary) > 3900:
+                        safe_summary = safe_summary[:3900] + "..."
+                        
                     summary_message = f"""
 ✨ AI Summary:
 
-{summary_text}
+{safe_summary}
                     """
                     bot.send_message(user_id, summary_message)
 
