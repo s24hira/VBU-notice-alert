@@ -120,11 +120,12 @@ class SupabaseStorage:
             title = notice_data.get('title', '')
             link = notice_data.get('link', '')
 
-            # Escape double quotes in title
+            # Escape double quotes to prevent filter injection
             safe_title = title.replace('"', '\\"')
+            safe_link = link.replace('"', '\\"')
             
             # Check if notice already exists by title or link using a single OR query
-            duplicate = self.supabase.table('notices').select('id').or_(f'title.eq."{safe_title}",link.eq."{link}"').execute()
+            duplicate = self.supabase.table('notices').select('id').or_(f'title.eq."{safe_title}",link.eq."{safe_link}"').execute()
             
             if duplicate.data:
                 logger.info(f"Notice '{title}' already exists. Skipping.")
