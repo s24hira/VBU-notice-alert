@@ -233,7 +233,7 @@ class GeminiPDFSummarizer:
         Initialize Gemini PDF Summarizer
         """
         self.api_key = api_key
-        self.models = ['gemini-3.5-flash', 'gemini-3-flash-preview']
+        self.models = ['gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite']
         self.current_model_index = 0
         self._model_lock = threading.Lock()
         self._headers = {
@@ -358,8 +358,6 @@ class GeminiPDFSummarizer:
                     logging.error(f"Error in Gemini summarization (attempt {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         sleep_time = backoff_factor * (2 ** attempt)
-                        if isinstance(e, requests.exceptions.HTTPError) and e.response is not None and e.response.status_code == 429:
-                            sleep_time = min(sleep_time, 10) # Faster retry to hit the alternative model
                         logging.info(f"Retrying in {sleep_time} seconds...")
                         time.sleep(sleep_time)
                     else:
@@ -433,8 +431,6 @@ class GeminiPDFSummarizer:
                     logging.error(f"Error in Gemini text categorization (attempt {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         sleep_time = backoff_factor * (2 ** attempt)
-                        if getattr(e, 'response', None) is not None and e.response.status_code == 429:
-                            sleep_time = min(sleep_time, 10) # Faster retry to hit the alternative model
                         logging.info(f"Retrying in {sleep_time} seconds...")
                         time.sleep(sleep_time)
                     else:
