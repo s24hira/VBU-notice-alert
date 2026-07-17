@@ -280,19 +280,19 @@ def resilient_get(url: str, *, timeout: int = 30,
     raise requests.HTTPError(msg)
 
 
-def resilient_get_pdf(url: str, *, timeout: int = 30,
+def resilient_download_file(url: str, *, timeout: int = 30,
                       max_retries: int = 3) -> requests.Response:
     """
-    Fetch a PDF URL with bypass strategies.
+    Fetch a file (PDF or Image) URL with bypass strategies.
 
-    Same as `resilient_get` but adds PDF-specific Accept headers
+    Same as `resilient_get` but adds file-specific Accept headers
     and uses streaming where possible.
     """
-    # For PDF downloads, the main anti-bot challenge is on the page fetch.
+    # For PDF/Image downloads, the main anti-bot challenge is on the page fetch.
     # S3 signed URLs typically don't block, so we use a simpler approach
     # with full headers.
     headers = _chrome_headers(url)
-    headers["Accept"] = "application/pdf,*/*;q=0.8"
+    headers["Accept"] = "application/pdf,image/webp,image/apng,image/*,*/*;q=0.8"
 
     last_error: Exception | None = None
 
@@ -307,28 +307,28 @@ def resilient_get_pdf(url: str, *, timeout: int = 30,
                 )
                 if resp.status_code != 403:
                     resp.raise_for_status()
-                    logger.info(f"PDF fetched via curl_cffi (attempt {attempt})")
+                    logger.info(f"File fetched via curl_cffi (attempt {attempt})")
                     return resp
             except ImportError:
                 pass
             except Exception:
-                logger.debug("curl_cffi PDF fetch failed, falling back")
+                logger.debug("curl_cffi file fetch failed, falling back")
 
             # Fallback to plain requests with browser headers
             resp = requests.get(url, headers=headers, timeout=timeout,
                                 verify=certifi.where(), stream=True)
             resp.raise_for_status()
-            logger.info(f"PDF fetched via requests (attempt {attempt})")
+            logger.info(f"File fetched via requests (attempt {attempt})")
             return resp
 
         except Exception as exc:
             last_error = exc
-            logger.warning(f"PDF download attempt {attempt} failed: "
+            logger.warning(f"File download attempt {attempt} failed: "
                            f"{type(exc).__name__}")
             if attempt < max_retries:
                 time.sleep(min(2 ** attempt + random.uniform(0, 1), 10))
 
-    msg = f"PDF download failed for {url} after {max_retries} attempts"
+    msg = f"File download failed for {url} after {max_retries} attempts"
     logger.error(msg)
     if last_error:
         raise requests.HTTPError(msg) from last_error

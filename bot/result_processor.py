@@ -7,7 +7,7 @@ import time
 from urllib.parse import urlparse
 import certifi
 
-from bot.utils.http_client import resilient_get, resilient_get_pdf
+from bot.utils.http_client import resilient_get, resilient_download_file
 
 from bot.utils.summarizer import GeminiPDFSummarizer, SummarizationError, NoticeExtraction
 from bot.storage import SupabaseStorage
@@ -19,7 +19,7 @@ class ResultProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
-        self.MAX_PDF_SIZE = 10 * 1024 * 1024  # 10 MB
+        self.MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
         self.ALLOWED_DOMAINS = [
             'visvabharati.ac.in',
             'visvabharati.samarth.edu.in',
@@ -119,43 +119,54 @@ class ResultProcessor:
                 
         return []
 
-    def download_pdf_bytes(self, pdf_url, max_retries=3):
-        if not self._is_safe_url(pdf_url):
-            logger.error(f"Unsafe or unauthorized URL requested: {pdf_url}")
-            return None
+    def download_file(self, file_url, max_retries=3):
+        if not self._is_safe_url(file_url):
+            logger.error(f"Unsafe or unauthorized URL requested: {file_url}")
+            return None, None
 
         try:
-            response = resilient_get_pdf(pdf_url, timeout=30,
+            response = resilient_download_file(file_url, timeout=30,
                                          max_retries=max_retries)
 
             content_length = int(response.headers.get('content-length', 0))
-            if content_length > self.MAX_PDF_SIZE:
-                logger.error(f"PDF too large: {content_length} bytes")
-                return None
+            if content_length > self.MAX_FILE_SIZE:
+                logger.error(f"File too large: {content_length} bytes")
+                return None, None
 
             # curl_cffi responses don't support iter_content, so read all at once
             content = response.content
 
-            # Validate it's actually a PDF
-            content_type = response.headers.get('content-type', '')
-            if not content_type.startswith('application/pdf') and b'%PDF-' not in content[:50]:
-                logger.error("Downloaded file does not appear to be a PDF")
-                return None
+            content_type = response.headers.get('content-type', '').lower()
+            
+            mime_type = None
+            if content_type.startswith('application/pdf') or b'%PDF-' in content[:50]:
+                mime_type = 'application/pdf'
+            elif content_type.startswith('image/'):
+                mime_type = content_type.split(';')[0]
+            else:
+                if content.startswith(b'\xff\xd8\xff'):
+                    mime_type = 'image/jpeg'
+                elif content.startswith(b'\x89PNG\r\n\x1a\n'):
+                    mime_type = 'image/png'
 
-            if len(content) > self.MAX_PDF_SIZE:
-                logger.error("PDF exceeds size limit")
-                return None
+            if not mime_type:
+                logger.error("Downloaded file does not appear to be a supported PDF or Image")
+                return None, None
+
+            if len(content) > self.MAX_FILE_SIZE:
+                logger.error("File exceeds size limit")
+                return None, None
 
             if len(content) < 100:
-                logger.error("Downloaded PDF file is too small")
-                return None
+                logger.error("Downloaded file is too small")
+                return None, None
 
-            return content
+            return content, mime_type
 
         except Exception:
-            logger.exception(f"PDF download failed after all strategies")
+            logger.exception(f"File download failed after all strategies")
 
-        return None
+        return None, None
 
     def send_telegram_alerts(self, bot, result, summary_text, user_ids):
         for user_id in user_ids:
@@ -168,7 +179,7 @@ Title: {result['title']}
 
 Date: {date_str}
 
-PDF Link: {result['link']}
+Link: {result['link']}
                 """
                 bot.send_message(user_id, alert_message)
 
@@ -223,8 +234,8 @@ PDF Link: {result['link']}
                     logger.exception("Result processing error")
                 finally:
                     # Clear memory for each result processed
-                    if 'pdf_bytes' in locals():
-                        del pdf_bytes
+                    if 'file_bytes' in locals():
+                        del file_bytes
                     if 'extraction' in locals():
                         del extraction
 

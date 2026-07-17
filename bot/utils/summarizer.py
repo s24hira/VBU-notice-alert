@@ -262,14 +262,14 @@ class GeminiPDFSummarizer:
                 
             self._gemini_schema["properties"][prop_name] = prop_schema
 
-    def summarize_pdf(self, pdf_bytes, max_retries=5, backoff_factor=5) -> NoticeExtraction:
+    def summarize_document(self, file_bytes, mime_type="application/pdf", max_retries=5, backoff_factor=5) -> NoticeExtraction:
         """
-        Summarize a PDF and extract target audience parameters.
+        Summarize a document (PDF or Image) and extract target audience parameters.
         Returns a NoticeExtraction pydantic object.
         """
         import time
         prompt = """
-        Analyze the provided Visva-Bharati notice PDF. The core vision for categorization is: "Does it impact the student, and if yes, which category (Bhavana/Department) is it impacting?"
+        Analyze the provided Visva-Bharati notice document (PDF or Image). The core vision for categorization is: "Does it impact the student, and if yes, which category (Bhavana/Department) is it impacting?"
         Extract the following information:
         1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
         2. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
@@ -281,15 +281,15 @@ class GeminiPDFSummarizer:
            - IMPORTANT: For joining notices, DO NOT classify it as a general notice (is_general MUST be false), and ensure the specific department is identified.
         """
 
-        b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+        b64_data = base64.b64encode(file_bytes).decode('utf-8')
         payload = {
             "contents": [
                 {
                     "parts": [
                         {
                             "inline_data": {
-                                "mime_type": "application/pdf",
-                                "data": b64_pdf
+                                "mime_type": mime_type,
+                                "data": b64_data
                             }
                         },
                         {
@@ -303,12 +303,12 @@ class GeminiPDFSummarizer:
                 "response_schema": self._gemini_schema
             }
         }
-        del b64_pdf  # Free memory immediately
+        del b64_data  # Free memory immediately
 
         try:
             for attempt in range(max_retries):
                 try:
-                    logging.info(f"Generating summary and categorization from in-memory PDF content (attempt {attempt + 1}/{max_retries})...")
+                    logging.info(f"Generating summary and categorization from in-memory document (attempt {attempt + 1}/{max_retries})...")
                     with requests.post(self.url, headers=self._headers, json=payload) as response:
                         response.raise_for_status()
                         
@@ -329,6 +329,6 @@ class GeminiPDFSummarizer:
                     else:
                         raise SummarizationError(f"Failed to generate structured summary from Gemini after {max_retries} attempts.")
 
-            raise SummarizationError("An unexpected error occurred during PDF processing.")
+            raise SummarizationError("An unexpected error occurred during document processing.")
         finally:
             del payload
