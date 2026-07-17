@@ -2,6 +2,7 @@ import os
 import base64
 import requests
 import json
+import threading
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional, Literal
 import logging
@@ -169,13 +170,16 @@ class NoticeExtraction(BaseModel):
     @field_validator('target_bhavana', mode='before')
     @classmethod
     def validate_bhavana(cls, v):
-        if not v or (isinstance(v, str) and v.lower() == 'null'):
+        if not v:
             return None
         if not isinstance(v, str):
             return None
         
         v_clean = v.strip()
         v_lower = v_clean.lower()
+        
+        if v_lower in ('none', 'null', 'n/a', 'not applicable', 'unknown'):
+            return None
         
         if v_lower in BHAVANA_ALIASES:
             return BHAVANA_ALIASES[v_lower]
@@ -190,13 +194,16 @@ class NoticeExtraction(BaseModel):
     @field_validator('target_department', mode='before')
     @classmethod
     def validate_department(cls, v):
-        if not v or (isinstance(v, str) and v.lower() == 'null'):
+        if not v:
             return None
         if not isinstance(v, str):
             return None
             
         v_clean = v.strip()
         v_lower = v_clean.lower()
+        
+        if v_lower in ('none', 'null', 'n/a', 'not applicable', 'unknown'):
+            return None
         
         if v_lower in DEPARTMENT_ALIASES:
             return DEPARTMENT_ALIASES[v_lower]
@@ -226,8 +233,9 @@ class GeminiPDFSummarizer:
         Initialize Gemini PDF Summarizer
         """
         self.api_key = api_key
-        self.model = 'gemini-3.5-flash'
-        self.url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        self.models = ['gemini-3.5-flash', 'gemini-3-flash-preview']
+        self.current_model_index = 0
+        self._model_lock = threading.Lock()
         self._headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": self.api_key
@@ -261,6 +269,12 @@ class GeminiPDFSummarizer:
                 prop_schema["enum"] = prop_details["enum"]
                 
             self._gemini_schema["properties"][prop_name] = prop_schema
+
+    def _get_next_url(self):
+        with self._model_lock:
+            model = self.models[self.current_model_index]
+            self.current_model_index = (self.current_model_index + 1) % len(self.models)
+        return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
     def summarize_document(self, file_bytes, mime_type="application/pdf", max_retries=5, backoff_factor=5) -> NoticeExtraction:
         """
@@ -324,8 +338,12 @@ class GeminiPDFSummarizer:
         try:
             for attempt in range(max_retries):
                 try:
-                    logging.info(f"Generating summary and categorization from in-memory document (attempt {attempt + 1}/{max_retries})...")
-                    with requests.post(self.url, headers=self._headers, json=payload) as response:
+                    url = self._get_next_url()
+                    model_name = url.split('/')[-1].split(':')[0]
+                    logging.info(f"Generating summary and categorization from in-memory document using {model_name} (attempt {attempt + 1}/{max_retries})...")
+                    with requests.post(url, headers=self._headers, json=payload) as response:
+                        if response.status_code == 429:
+                            logging.warning(f"Gemini API rate limit exceeded (429) for {model_name}.")
                         response.raise_for_status()
                         
                         response_data = response.json()
@@ -340,11 +358,88 @@ class GeminiPDFSummarizer:
                     logging.error(f"Error in Gemini summarization (attempt {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         sleep_time = backoff_factor * (2 ** attempt)
+                        if isinstance(e, requests.exceptions.HTTPError) and e.response is not None and e.response.status_code == 429:
+                            sleep_time = min(sleep_time, 10) # Faster retry to hit the alternative model
                         logging.info(f"Retrying in {sleep_time} seconds...")
                         time.sleep(sleep_time)
                     else:
                         raise SummarizationError(f"Failed to generate structured summary from Gemini after {max_retries} attempts.")
 
             raise SummarizationError("An unexpected error occurred during document processing.")
+        finally:
+            del payload
+
+    def categorize_text(self, text: str, max_retries=10, backoff_factor=5) -> NoticeExtraction:
+        """
+        Categorize based on text/title when file is unavailable or not needed.
+        """
+        import time
+        prompt = f"""
+        You are an expert administrative assistant for Visva-Bharati University.
+        Analyze the provided notice title/text and extract the target audience parameters.
+
+        Notice Text/Title: {text}
+
+        CORE CATEGORIZATION RULE:
+        Focus on the impact to students or staff: "Does this notice impact them, and if yes, which specific Bhavana/Department?"
+
+        EXTRACTION REQUIREMENTS:
+        1. SUMMARY:
+           - Provide a highly concise, one-line summary based on the text.
+        2. TARGET_BHAVANA:
+           - The exact Institute (Bhavana) name. Map nicknames/variants. Return null if not applicable.
+        3. TARGET_DEPARTMENT:
+           - The exact Department name. Map variants. Return null if not applicable.
+        4. IS_GENERAL:
+           - Set to true if it applies broadly to ALL students/staff.
+           - Set to false if it targets specific institutes/departments.
+        """
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "response_mime_type": "application/json",
+                "response_schema": self._gemini_schema
+            }
+        }
+
+        try:
+            for attempt in range(max_retries):
+                try:
+                    url = self._get_next_url()
+                    model_name = url.split('/')[-1].split(':')[0]
+                    logging.info(f"Generating categorization from text using {model_name} (attempt {attempt + 1}/{max_retries})...")
+                    with requests.post(url, headers=self._headers, json=payload) as response:
+                        if response.status_code == 429:
+                            logging.warning(f"Gemini API rate limit exceeded (429) for {model_name}.")
+                        response.raise_for_status()
+                        
+                        response_data = response.json()
+                    text_result = response_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    
+                    if not text_result:
+                        raise SummarizationError("Empty response from Gemini API.")
+                        
+                    return NoticeExtraction.model_validate_json(text_result)
+
+                except Exception as e:
+                    logging.error(f"Error in Gemini text categorization (attempt {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        sleep_time = backoff_factor * (2 ** attempt)
+                        if getattr(e, 'response', None) is not None and e.response.status_code == 429:
+                            sleep_time = min(sleep_time, 10) # Faster retry to hit the alternative model
+                        logging.info(f"Retrying in {sleep_time} seconds...")
+                        time.sleep(sleep_time)
+                    else:
+                        raise SummarizationError(f"Failed to categorize text from Gemini after {max_retries} attempts.")
+
+            raise SummarizationError("An unexpected error occurred during text categorization.")
         finally:
             del payload

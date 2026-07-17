@@ -150,14 +150,20 @@ def _try_curl_cffi(url: str, timeout: int = 30) -> requests.Response | None:
         return None
 
     try:
+        import urllib.request
+        proxies = urllib.request.getproxies()
         headers = _chrome_headers(url)
-        resp = cffi_requests.get(
-            url,
-            headers=headers,
-            timeout=timeout,
-            verify=certifi.where(),
-            impersonate="chrome131",       # JA3 fingerprint of Chrome 131
-        )
+        
+        kwargs = {
+            "headers": headers,
+            "timeout": timeout,
+            "verify": certifi.where(),
+            "impersonate": "chrome131"
+        }
+        if proxies:
+            kwargs["proxies"] = proxies
+            
+        resp = cffi_requests.get(url, **kwargs)
         if resp.status_code == 403:
             logger.warning("curl_cffi got 403 – will try next strategy")
             try:
@@ -317,15 +323,36 @@ def resilient_download_file(url: str, *, timeout: int = 30,
             # 2. Fallback Strategy: curl_cffi (if requests gets 403)
             try:
                 from curl_cffi import requests as cffi_requests
-                resp = cffi_requests.get(
-                    url, headers=headers, timeout=timeout,
-                    verify=certifi.where(), impersonate="chrome131",
-                )
+                import urllib.request
+                
+                proxies = urllib.request.getproxies()
+                kwargs = {
+                    "headers": headers,
+                    "timeout": timeout,
+                    "verify": certifi.where(),
+                    "impersonate": "chrome131",
+                    "stream": True
+                }
+                if proxies:
+                    kwargs["proxies"] = proxies
+                    
+                resp = cffi_requests.get(url, **kwargs)
                 resp.raise_for_status()
                 
-                # Check size post-download for curl_cffi since older versions don't stream well
-                if len(resp.content) > max_size:
-                    raise ValueError(f"File exceeds maximum allowed size of {max_size} bytes")
+                content = bytearray()
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        content.extend(chunk)
+                        if len(content) > max_size:
+                            raise ValueError(f"File exceeds maximum allowed size of {max_size} bytes")
+                
+                # Mock the content property for downstream consumers
+                resp._content = bytes(content)
+                # Some curl_cffi versions might use content property setter differently, so we ensure it's accessible
+                try:
+                    resp.content = bytes(content)
+                except AttributeError:
+                    pass
                     
                 logger.info(f"File fetched via curl_cffi fallback (attempt {attempt})")
                 return resp

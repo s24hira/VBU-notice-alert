@@ -172,10 +172,15 @@ class ResultProcessor:
         for user_id in user_ids:
             try:
                 date_str = result['date'].strftime('%b %d, %Y') if isinstance(result.get('date'), datetime.date) else "N/A"
+                
+                safe_title = result['title']
+                if len(safe_title) > 2000:
+                    safe_title = safe_title[:2000] + "..."
+
                 alert_message = f"""
 🚨Examination Result!🚨
 
-Title: {result['title']}
+Title: {safe_title}
 
 Date: {date_str}
 
@@ -184,10 +189,14 @@ Link: {result['link']}
                 bot.send_message(user_id, alert_message)
 
                 if summary_text:
+                    safe_summary = summary_text
+                    if len(safe_summary) > 3900:
+                        safe_summary = safe_summary[:3900] + "..."
+                        
                     summary_message = f"""
 ✨ AI Summary:
 
-{summary_text}
+{safe_summary}
                     """
                     bot.send_message(user_id, summary_message)
 
@@ -205,14 +214,28 @@ Link: {result['link']}
                 try:
                     logger.info(f"Processing result: {result['title']}")
 
+                    try:
+                        extraction = self.summarizer.categorize_text(result['title'])
+                    except SummarizationError:
+                        logger.exception("Text categorization failed for result")
+                        logger.warning(f"Strict requirement not met: Skipping result '{result['title']}' due to categorization failure.")
+                        continue
+
+                    if not extraction:
+                        logger.error("Strict requirement not met: Extraction yielded empty result.")
+                        continue
+
+                    # Sleep to respect the Gemini API free tier rate limit (15 requests per minute)
+                    time.sleep(5)
+
                     result_data = {
                         'title': result['title'],
                         'link': result['link'],
                         'date': result['date'],
-                        'summary': '',
-                        'target_bhavana': None,
-                        'target_department': None,
-                        'is_general': True,
+                        'summary': extraction.summary or '',
+                        'target_bhavana': extraction.target_bhavana,
+                        'target_department': extraction.target_department,
+                        'is_general': extraction.is_general,
                         'status': 'New'
                     }
 
