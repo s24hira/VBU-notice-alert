@@ -182,16 +182,23 @@ Link: {notice['link']}
                 try:
                     logger.info(f"Processing notice: {notice['title']}")
                     file_bytes, mime_type = self.download_file(notice['link'])
+                    
                     if not file_bytes or not mime_type:
-                        continue
-
-                    logger.info(f"Generating summary using Gemini (MIME: {mime_type})")
-                    try:
-                        extraction = self.summarizer.summarize_document(file_bytes, mime_type=mime_type)
-                    except SummarizationError:
-                        logger.exception("Summarization failed")
-                        logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to summarization failure.")
-                        continue
+                        logger.info(f"File unavailable for '{notice['title']}'. Falling back to text categorization.")
+                        try:
+                            extraction = self.summarizer.categorize_text(notice['title'])
+                        except SummarizationError:
+                            logger.exception("Text categorization failed")
+                            logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to text categorization failure.")
+                            continue
+                    else:
+                        logger.info(f"Generating summary using Gemini (MIME: {mime_type})")
+                        try:
+                            extraction = self.summarizer.summarize_document(file_bytes, mime_type=mime_type)
+                        except SummarizationError:
+                            logger.exception("Summarization failed")
+                            logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to summarization failure.")
+                            continue
                     
                     if not extraction or not extraction.summary:
                         logger.error("Strict requirement not met: Extraction yielded empty summary.")
