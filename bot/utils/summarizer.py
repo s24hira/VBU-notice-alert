@@ -269,16 +269,32 @@ class GeminiPDFSummarizer:
         """
         import time
         prompt = """
-        Analyze the provided Visva-Bharati notice document (PDF or Image). The core vision for categorization is: "Does it impact the student, and if yes, which category (Bhavana/Department) is it impacting?"
-        Extract the following information:
-        1. A concise bullet-point summary in simple text format. DO NOT use markdown format (avoid * characters). DO NOT include helplines/links.
-        2. target_bhavana: The exact Institute (Bhavana) name matching the allowed schema enum values. Map nicknames or variants (e.g. 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV'). Null if not mentioned or doesn't match any allowed value.
-           - IMPORTANT: If a notice is issued by the central office but involves actions/interests specific to a particular Institute/Department's students, set target_bhavana to that specific Institute, NOT the Central Office.
-        3. target_department: The exact Department name matching the allowed schema enum values. Map variants (e.g. 'Department of Physics' -> 'Physics', 'Dept of CS' -> 'Computer & System Sciences'). Null if not mentioned or doesn't match any allowed value.
-           - IMPORTANT: For joining notices, you MUST identify and set the target_department (and target_bhavana if applicable) for which the employee is joining.
-        4. is_general: Set to true if this notice applies broadly to all students/staff, or false if it is specific to particular institutes/departments.
-           - IMPORTANT: If a notice is issued by the central office but involves actions/interests for ALL university students, MUST set is_general to true.
-           - IMPORTANT: For joining notices, DO NOT classify it as a general notice (is_general MUST be false), and ensure the specific department is identified.
+        You are an expert administrative assistant for Visva-Bharati University.
+        Analyze the provided university notice (PDF or Image) and extract the most critical, actionable information.
+
+        CORE CATEGORIZATION RULE:
+        Focus on the impact to students or staff: "Does this notice impact them, and if yes, which specific Bhavana/Department?"
+
+        EXTRACTION REQUIREMENTS:
+        1. SUMMARY:
+           - Provide a highly concise, bulleted summary (use plain dashes '-' or bullets '•' instead of markdown asterisks '*').
+           - Focus STRICTLY on actionable points: deadlines, important dates, venues, eligibility criteria, and required actions.
+           - Ignore boilerplate administrative text (e.g., "This is to notify...", signatures).
+           - Do not include standard helplines or redundant URLs unless strictly required for a specific action.
+           - Ensure the text is easily readable on a mobile device screen.
+
+        2. TARGET_BHAVANA:
+           - The exact Institute (Bhavana) name. Map nicknames/variants (e.g., 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV').
+           - IMPORTANT: If a central office issues a notice but it targets a specific Institute's students, select that Institute, NOT Central Office. Return null if not applicable.
+
+        3. TARGET_DEPARTMENT:
+           - The exact Department name. Map variants (e.g., 'Dept of CS' -> 'Computer & System Sciences').
+           - IMPORTANT: For joining notices or department-specific events, you MUST identify the specific department. Return null if not applicable.
+
+        4. IS_GENERAL:
+           - Set to true if the notice applies broadly to ALL university students/staff.
+           - Set to false if it targets specific institutes/departments, or specific individuals (e.g., joining notices).
+           - IMPORTANT: If a notice is issued by the central office but involves actions/interests for ALL university students, you MUST set is_general to true.
         """
 
         b64_data = base64.b64encode(file_bytes).decode('utf-8')
