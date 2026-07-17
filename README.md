@@ -8,6 +8,8 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 
 - **Automated Monitoring:** Continuously scans the Visva-Bharati website for new notices and the Samarth portal for examination results at randomized, natural intervals (10–20 minutes).
 - **Direct PDF Summarization:** Uses Google's **Gemini REST API** (directly over HTTP to minimize RAM overhead) to summarize PDFs inline and extract target audience parameters.
+- **Model Rotation & Failover:** Rotates dynamically between `gemini-3.5-flash` and `gemini-3-flash-preview` to balance API quota. If a model encounters a rate limit (429), the bot automatically switches to the alternative model and retries instantly with a reduced wait time (max 10s).
+- **Fallback Title Categorization:** If a notice PDF or image is unavailable or fails to download, the bot falls back to categorizing and extracting target parameters based purely on the text of the notice title.
 - **Strict Notice Processing:** Mandates successful summary extraction. If summarization fails or returns empty, the notice is skipped and intelligently deferred for retry.
 - **Intelligent Retry Logic:** Integrates an exponential backoff mechanism for the Gemini API to gracefully handle sudden rate-limiting or 503 unavailability errors.
 - **Instant Targeted Alerts:** Dispatches notice and result titles, links, and summaries. Users receive notifications perfectly matched to their institute and department configurations!
@@ -17,6 +19,7 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 - **Memory Optimized Architecture:** Addresses glibc heap fragmentation in Docker via periodic `malloc_trim(0)` calls and tuned `MALLOC_MMAP_THRESHOLD_` / `MALLOC_TRIM_THRESHOLD_` environment variables, ensuring freed memory is returned to the OS. Also recycles the Supabase `httpx` connection pool every ~3 hours and uses stateless HTTP requests with strict context managers throughout.
 - **Non-Blocking Startup:** The initial notice/result scrape runs in its own daemon thread so the Telegram polling thread is never blocked. Bot commands respond instantly from the first second of deployment. `long_polling_timeout` is set to the Telegram-recommended 20 s (was incorrectly set to 90 s, which caused ~1-minute delays on first command).
 - **Multi-Strategy Anti-Bot Bypass:** Uses a layered HTTP client (`cloudscraper` → `curl_cffi` → session warmup) with rotated User-Agents, full browser-grade headers, TLS fingerprint impersonation, and cookie pre-warming to reliably bypass WAF/anti-bot protections on the Samarth eGov portal.
+- **Safe Truncation:** Prevents Telegram alert drops by safely truncating long notice titles (max 2000 chars) and AI summaries (max 3900 chars) before broadcasting to conform to Telegram's 4096-character limit.
 
 ---
 
