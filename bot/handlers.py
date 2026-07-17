@@ -235,7 +235,7 @@ class BotHandlers:
                 return
             
             # Start the setup flow directly if they are new or incomplete
-            self._setup_state[chat_id] = {}
+            self._setup_state[chat_id] = {'initiator_id': message.from_user.id}
             msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease select your **Institute (Bhavana)** to begin:"
             self.bot.send_message(
                 chat_id, 
@@ -271,6 +271,12 @@ class BotHandlers:
                 f"🔧 **Settings**{name_str}\n\n"
                 f"What would you like to do?"
             )
+            
+            # Track who opened the settings menu for group chat auth
+            state = self._setup_state.get(chat_id, {})
+            state['initiator_id'] = message.from_user.id
+            self._setup_state[chat_id] = state
+
             self.bot.send_message(
                 chat_id,
                 msg_text,
@@ -300,12 +306,26 @@ class BotHandlers:
         @self.bot.callback_query_handler(func=lambda call: True)
         def callback_query(call):
             try:
-                # Security: Only process callbacks in private chats where the
-                # button presser is the chat owner. Prevents one user from
-                # triggering account actions (e.g. deletion) on another user's behalf.
-                if call.from_user.id != call.message.chat.id:
-                    self.bot.answer_callback_query(call.id, "Unauthorized action.")
-                    return
+                chat_id = call.message.chat.id
+                user_id = call.from_user.id
+
+                # Security for groups: only allow the user who initiated the setup 
+                # to click the buttons. We track this via _setup_state.
+                if chat_id < 0:  # Group chat
+                    setup_state = self._setup_state.get(chat_id, {})
+                    initiator_id = setup_state.get('initiator_id')
+                    
+                    if not initiator_id:
+                        self.bot.answer_callback_query(call.id, "Session expired. Please type /start or /settings again.", show_alert=True)
+                        return
+                    if user_id != initiator_id:
+                        self.bot.answer_callback_query(call.id, "Only the person who initiated this command can interact with it.", show_alert=True)
+                        return
+                else:
+                    # In private chats, the button presser MUST be the chat owner
+                    if user_id != chat_id:
+                        self.bot.answer_callback_query(call.id, "Unauthorized action.")
+                        return
 
                 self.bot.answer_callback_query(call.id)
                 data = call.data
@@ -354,8 +374,8 @@ class BotHandlers:
                 # ── Settings: Reset ───────────────────────────────────────────
                 if data == "SETTINGS_RESET":
                     chat_id = call.message.chat.id
-                    # Clear name from state so the name-input step is triggered again
-                    self._setup_state[chat_id] = {}
+                    # Clear name from state so the name-input step is triggered again, but preserve initiator
+                    self._setup_state[chat_id] = {'initiator_id': call.from_user.id}
                     self._user_is_existing[chat_id] = True  # Keep cancel button available
                     self.bot.edit_message_text(
                         chat_id=chat_id,

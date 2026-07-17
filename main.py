@@ -79,6 +79,7 @@ os.makedirs('data/temp', exist_ok=True)
 
 class VBUNoticeBot:
     def __init__(self):
+        self.webhook_secret = None
         self.bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
         self.storage = SupabaseStorage()
         self.summarizer = GeminiPDFSummarizer(GEMINI_API_KEY)
@@ -122,13 +123,15 @@ class VBUNoticeBot:
             webhook_url = os.getenv('WEBHOOK_URL')
             if webhook_url:
                 # Webhook mode
+                import secrets
+                self.webhook_secret = secrets.token_urlsafe(32)
                 logger.info(f"Starting in Webhook mode (URL: {webhook_url})")
                 try:
                     self.bot.delete_webhook()
                     time.sleep(0.5)
                     full_webhook_url = webhook_url if webhook_url.endswith('/webhook') else webhook_url.rstrip('/') + '/webhook'
-                    self.bot.set_webhook(url=full_webhook_url)
-                    logger.info("Webhook set successfully")
+                    self.bot.set_webhook(url=full_webhook_url, secret_token=self.webhook_secret)
+                    logger.info("Webhook set securely with secret token")
                 except Exception as e:
                     logger.error(f"Error setting webhook: {e}")
             else:
@@ -209,6 +212,14 @@ def make_handler(bot_instance):
                 
         def do_POST(self):
             if self.path == '/webhook':
+                # Validate Telegram's secret token to prevent spoofing
+                secret_token = self.headers.get('X-Telegram-Bot-Api-Secret-Token')
+                if bot_instance.webhook_secret and secret_token != bot_instance.webhook_secret:
+                    logger.warning("Unauthorized webhook access attempt (Invalid secret token)")
+                    self.send_response(401)
+                    self.end_headers()
+                    return
+
                 content_length = int(self.headers.get('Content-Length', 0))
                 post_data = self.rfile.read(content_length).decode('utf-8')
                 
@@ -232,10 +243,11 @@ def make_handler(bot_instance):
     return WebhookAndHealthCheckHandler
 
 def start_server(bot_instance, port=8000):
-    socketserver.TCPServer.allow_reuse_address = True
+    # Use ThreadingTCPServer so concurrent requests (health checks + webhooks) don't block
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
     handler_class = make_handler(bot_instance)
     try:
-        with socketserver.TCPServer(("", port), handler_class) as httpd:
+        with socketserver.ThreadingTCPServer(("", port), handler_class) as httpd:
             logger.info(f"Health check and webhook server listening on port {port}")
             httpd.serve_forever()
     except Exception as e:
@@ -257,7 +269,8 @@ def main():
     bot = VBUNoticeBot()
     
     # Start the health/webhook server in a background thread
-    server_thread = threading.Thread(target=start_server, args=(bot,), kwargs={'port': 8000}, daemon=True)
+    port = int(os.getenv("PORT", 8000))
+    server_thread = threading.Thread(target=start_server, args=(bot,), kwargs={'port': port}, daemon=True)
     server_thread.start()
 
     bot.run()
