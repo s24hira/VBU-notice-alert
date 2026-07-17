@@ -358,6 +358,7 @@ class GeminiPDFSummarizer:
                     logging.error(f"Error in Gemini summarization (attempt {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         sleep_time = backoff_factor * (2 ** attempt)
+                        sleep_time = min(sleep_time, 60)  # Cap maximum backoff to 60 seconds
                         logging.info(f"Retrying in {sleep_time} seconds...")
                         time.sleep(sleep_time)
                     else:
@@ -431,6 +432,7 @@ class GeminiPDFSummarizer:
                     logging.error(f"Error in Gemini text categorization (attempt {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         sleep_time = backoff_factor * (2 ** attempt)
+                        sleep_time = min(sleep_time, 60)  # Cap maximum backoff to 60 seconds
                         logging.info(f"Retrying in {sleep_time} seconds...")
                         time.sleep(sleep_time)
                     else:
