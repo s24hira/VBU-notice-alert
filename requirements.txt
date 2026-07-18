@@ -11,3 +11,7 @@ cachetools==5.3.3
 # Anti-bot bypass strategies for scraping protected sites
 cloudscraper>=1.2.71
 curl_cffi>=0.7.0
+
+# API and Web Server
+fastapi>=0.110.0
+uvicorn>=0.29.0

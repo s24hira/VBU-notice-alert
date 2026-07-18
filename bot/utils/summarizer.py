@@ -295,7 +295,7 @@ class GeminiPDFSummarizer:
            - Focus STRICTLY on actionable points: deadlines, important dates, venues, eligibility criteria, and required actions.
            - Ignore boilerplate administrative text (e.g., "This is to notify...", signatures).
            - Do not include standard helplines or redundant URLs unless strictly required for a specific action.
-           - Ensure the text is easily readable on a mobile device screen.
+           - Ensure the text is easily readable on a mobile device screen. Give adequate empty spaces and lines.
 
         2. TARGET_BHAVANA:
            - The exact Institute (Bhavana) name. Map nicknames/variants (e.g., 'Siksha Bhavan' -> 'Siksha Bhavana', 'Palli Samgasa Vibhaga' -> 'PSV').

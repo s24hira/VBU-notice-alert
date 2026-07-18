@@ -7,8 +7,11 @@ import time
 from dotenv import load_dotenv
 import threading
 import gc
-import http.server
-import socketserver
+import asyncio
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, HTTPException
+import uvicorn
+from concurrent.futures import ThreadPoolExecutor
 
 # Prevent requests.Session memory bloat by recreating it every 5 minutes
 apihelper.SESSION_TIME_TO_LIVE = 5 * 60
@@ -118,142 +121,42 @@ class VBUNoticeBot:
             release_memory()
             logger.info(f"Initial RSS after GC: {get_rss_mb()} MB")
 
-    def run(self):
-        try:
-            webhook_url = os.getenv('WEBHOOK_URL')
-            if webhook_url:
-                # Webhook mode
-                import secrets
-                self.webhook_secret = secrets.token_urlsafe(32)
-                logger.info(f"Starting in Webhook mode (URL: {webhook_url})")
-                try:
-                    self.bot.delete_webhook()
-                    time.sleep(0.5)
-                    full_webhook_url = webhook_url if webhook_url.endswith('/webhook') else webhook_url.rstrip('/') + '/webhook'
-                    self.bot.set_webhook(url=full_webhook_url, secret_token=self.webhook_secret)
-                    logger.info("Webhook set securely with secret token")
-                except Exception as e:
-                    logger.error(f"Error setting webhook: {e}")
-            else:
-                # Polling mode
-                logger.info("Starting in Polling mode")
-                self.reset_webhook()
-    
-                # Start Telegram bot polling in a separate thread.
-                # long_polling_timeout=20 is the standard value recommended by the
-                # Telegram Bot API docs.
-                polling_thread = threading.Thread(
-                    target=self.bot.infinity_polling,
-                    kwargs={'timeout': 25, 'long_polling_timeout': 20},
-                    name='polling',
-                )
-                polling_thread.daemon = True
-                polling_thread.start()
-                logger.info("Bot infinity_polling started in separate thread")
+    def scheduled_checks_loop(self):
+        logger.info("Starting main loop")
+        while True:
+            next_interval = random.randint(600, 1200)  # 10-20 minutes
+            logger.info(f"Next check in {next_interval}s | RSS: {get_rss_mb()} MB")
+            time.sleep(next_interval)
 
-            # Run the initial scrape in its own daemon thread so that the
-            # polling thread (and therefore all bot commands) are never blocked.
-            initial_check_thread = threading.Thread(
-                target=self._run_initial_check,
-                name='initial_check',
-                daemon=True,
-            )
-            initial_check_thread.start()
-            logger.info("Initial check dispatched to background thread")
-            logger.info("Starting main loop")
+            try:
+                existing_titles, existing_urls = self.storage.get_existing_notices()
+                self.notice_processor.process_new_notices(self.bot, existing_titles, existing_urls)
+                self.result_processor.process_new_results(self.bot, existing_titles, existing_urls)
+            except Exception as e:
+                logger.error(f"Error in scheduled job: {type(e).__name__}")
 
-            while True:
-                next_interval = random.randint(600, 1200)  # 10-20 minutes
-                logger.info(f"Next check in {next_interval}s | RSS: {get_rss_mb()} MB")
-                time.sleep(next_interval)
+            self._check_count += 1
 
-                try:
-                    existing_titles, existing_urls = self.storage.get_existing_notices()
-                    self.notice_processor.process_new_notices(self.bot, existing_titles, existing_urls)
-                    self.result_processor.process_new_results(self.bot, existing_titles, existing_urls)
-                except Exception as e:
-                    logger.error(f"Error in scheduled job: {type(e).__name__}")
+            # Recycle the Supabase client every 6 cycles (~3 hours)
+            # to flush accumulated httpx connection pool / SSL state
+            if self._check_count % 6 == 0:
+                logger.info("Recycling Supabase client connection pool")
+                self.storage.reconnect()
 
-                self._check_count += 1
+                logger.info("Recycling HTTP client connection pools")
+                reset_sessions()
 
-                # Recycle the Supabase client every 6 cycles (~3 hours)
-                # to flush accumulated httpx connection pool / SSL state
-                if self._check_count % 6 == 0:
-                    logger.info("Recycling Supabase client connection pool")
-                    self.storage.reconnect()
+            # Force glibc to return freed memory to OS
+            release_memory()
+            logger.info(f"Post-GC RSS: {get_rss_mb()} MB")
 
-                    logger.info("Recycling HTTP client connection pools")
-                    reset_sessions()
+# Global variables for FastAPI lifecycle
+bot_instance = None
+executor = ThreadPoolExecutor()
 
-                # Force glibc to return freed memory to OS
-                release_memory()
-                logger.info(f"Post-GC RSS: {get_rss_mb()} MB")
-
-        except Exception as e:
-            logger.error(f"Error in main loop: {type(e).__name__}")
-            raise
-
-def make_handler(bot_instance):
-    class WebhookAndHealthCheckHandler(http.server.BaseHTTPRequestHandler):
-        """HTTP handler for Koyeb TCP health checks and Telegram Webhooks.
-    
-        Responds 200 OK to GET / and GET /health.
-        Receives Telegram updates on POST /webhook.
-        """
-        def do_GET(self):
-            if self.path in ('/', '/health'):
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/plain; charset=utf-8')
-                self.end_headers()
-                self.wfile.write(b'OK')
-            else:
-                self.send_response(404)
-                self.end_headers()
-                
-        def do_POST(self):
-            if self.path == '/webhook':
-                # Validate Telegram's secret token to prevent spoofing
-                secret_token = self.headers.get('X-Telegram-Bot-Api-Secret-Token')
-                if bot_instance.webhook_secret and secret_token != bot_instance.webhook_secret:
-                    logger.warning("Unauthorized webhook access attempt (Invalid secret token)")
-                    self.send_response(401)
-                    self.end_headers()
-                    return
-
-                content_length = int(self.headers.get('Content-Length', 0))
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                
-                try:
-                    update = telebot.types.Update.de_json(post_data)
-                    bot_instance.bot.process_new_updates([update])
-                    self.send_response(200)
-                    self.end_headers()
-                except Exception as e:
-                    logger.error(f"Error processing webhook update: {e}")
-                    self.send_response(500)
-                    self.end_headers()
-            else:
-                self.send_response(404)
-                self.end_headers()
-    
-        def log_message(self, format, *args):
-            # Suppress per-request access logs to keep stdout clean
-            pass
-            
-    return WebhookAndHealthCheckHandler
-
-def start_server(bot_instance, port=8000):
-    # Use ThreadingTCPServer so concurrent requests (health checks + webhooks) don't block
-    socketserver.ThreadingTCPServer.allow_reuse_address = True
-    handler_class = make_handler(bot_instance)
-    try:
-        with socketserver.ThreadingTCPServer(("", port), handler_class) as httpd:
-            logger.info(f"Health check and webhook server listening on port {port}")
-            httpd.serve_forever()
-    except Exception as e:
-        logger.error(f"Failed to start server: {e}")
-
-def main():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global bot_instance
     logger.info("Starting Visva-Bharati Notice Bot application...")
     
     if not TELEGRAM_BOT_TOKEN:
@@ -266,14 +169,102 @@ def main():
         logger.error("SUPABASE_URL or SUPABASE_KEY not set in environment variables.")
         return
         
-    bot = VBUNoticeBot()
-    
-    # Start the health/webhook server in a background thread
-    port = int(os.getenv("PORT", 8000))
-    server_thread = threading.Thread(target=start_server, args=(bot,), kwargs={'port': port}, daemon=True)
-    server_thread.start()
+    bot_instance = VBUNoticeBot()
 
-    bot.run()
+    webhook_url = os.getenv('WEBHOOK_URL')
+    if webhook_url:
+        # Webhook mode
+        import secrets
+        bot_instance.webhook_secret = secrets.token_urlsafe(32)
+        logger.info(f"Starting in Webhook mode (URL: {webhook_url})")
+        
+        def _setup_webhook():
+            try:
+                bot_instance.bot.delete_webhook()
+                time.sleep(0.5)
+                full_webhook_url = webhook_url if webhook_url.endswith('/webhook') else webhook_url.rstrip('/') + '/webhook'
+                bot_instance.bot.set_webhook(url=full_webhook_url, secret_token=bot_instance.webhook_secret)
+                logger.info("Webhook set securely with secret token")
+            except Exception as e:
+                logger.error(f"Error setting webhook: {e}")
+                
+        # Run synchronous webhook setup in a background thread
+        threading.Thread(target=_setup_webhook, daemon=True).start()
+    else:
+        # Polling mode
+        logger.info("Starting in Polling mode")
+        bot_instance.reset_webhook()
+
+        # Start Telegram bot polling in a separate thread.
+        polling_thread = threading.Thread(
+            target=bot_instance.bot.infinity_polling,
+            kwargs={'timeout': 25, 'long_polling_timeout': 20},
+            name='polling',
+        )
+        polling_thread.daemon = True
+        polling_thread.start()
+        logger.info("Bot infinity_polling started in separate thread")
+
+    # Run the initial scrape in its own daemon thread so that the
+    # polling thread (and therefore all bot commands) are never blocked.
+    initial_check_thread = threading.Thread(
+        target=bot_instance._run_initial_check,
+        name='initial_check',
+        daemon=True,
+    )
+    initial_check_thread.start()
+    logger.info("Initial check dispatched to background thread")
+
+    # Start the scheduled background loop
+    loop_thread = threading.Thread(target=bot_instance.scheduled_checks_loop, daemon=True)
+    loop_thread.start()
+    logger.info("Scheduled checks loop dispatched to background thread")
+
+    yield # Let FastAPI handle web requests here
+
+    # Cleanup
+    if executor:
+        executor.shutdown(wait=False)
+
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/")
+@app.get("/health")
+async def health_check():
+    return "OK"
+
+@app.post("/webhook")
+async def handle_webhook(request: Request):
+    if not bot_instance:
+        raise HTTPException(status_code=503, detail="Bot is not initialized yet")
+
+    # Validate Telegram's secret token to prevent spoofing
+    secret_token = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
+    if bot_instance.webhook_secret and secret_token != bot_instance.webhook_secret:
+        logger.warning("Unauthorized webhook access attempt (Invalid secret token)")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        post_data = await request.body()
+        post_data_str = post_data.decode('utf-8')
+        update = telebot.types.Update.de_json(post_data_str)
+        
+        # 3. Offload CPU-Heavy Tasks (Critical)
+        # Using a ThreadPoolExecutor prevents the entire async event loop 
+        # from freezing while pyTelegramBotAPI synchronously processes the update.
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(
+            executor, 
+            bot_instance.bot.process_new_updates, 
+            [update]
+        )
+        
+        return "OK"
+    except Exception as e:
+        logger.error(f"Error processing webhook update: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 if __name__ == '__main__':
-    main()
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Starting uvicorn server on port {port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
