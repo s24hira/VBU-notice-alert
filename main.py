@@ -197,7 +197,7 @@ async def lifespan(app: FastAPI):
         # Start Telegram bot polling in a separate thread.
         polling_thread = threading.Thread(
             target=bot_instance.bot.infinity_polling,
-            kwargs={'timeout': 25, 'long_polling_timeout': 20},
+            kwargs={'timeout': 60, 'long_polling_timeout': 20},
             name='polling',
         )
         polling_thread.daemon = True

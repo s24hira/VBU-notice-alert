@@ -248,10 +248,20 @@ def resilient_get(url: str, *, timeout: int = 30,
     Returns a `requests.Response` on success.
     Raises `requests.HTTPError` if all strategies and retries are exhausted.
     """
+    def _try_plain_requests(url, timeout=30):
+        try:
+            r = requests.get(url, timeout=timeout, verify=certifi.where())
+            if r.status_code == 200:
+                return r
+            return None
+        except Exception:
+            return None
+
     strategies = [
         ("cloudscraper", _try_cloudscraper),
         ("curl_cffi", _try_curl_cffi),
         ("session_warmup", _try_session_warmup),
+        ("plain_requests", _try_plain_requests)
     ]
 
     last_error: Exception | None = None
