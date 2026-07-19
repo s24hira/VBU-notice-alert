@@ -248,10 +248,16 @@ def _get_github_proxies():
     now = time.time()
     if not _proxy_list_cache or (now - _proxy_list_last_fetched > 1800):
         urls = [
-            ("http", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/http.txt"),
-            ("http", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/https.txt"),
-            ("socks4", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/socks4.txt"),
-            ("socks5", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/socks5.txt")
+            ("http", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"),
+            ("socks4", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt"),
+            ("socks5", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt"),
+            ("http", "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt"),
+            ("https", "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/https.txt"),
+            ("http", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.txt"),
+            ("socks4", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks4/data.txt"),
+            ("socks5", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"),
+            ("http", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt"),
+            ("http", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/countries/US/data.txt")
         ]
         all_proxies = []
         for protocol, url in urls:

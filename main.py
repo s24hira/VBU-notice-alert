@@ -265,5 +265,9 @@ async def handle_webhook(request: Request):
 
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 8000))
+    # Override WEB_CONCURRENCY to prevent PaaS providers (like Koyeb) from 
+    # starting multiple uvicorn workers, which duplicates background threads.
+    if "WEB_CONCURRENCY" in os.environ:
+        del os.environ["WEB_CONCURRENCY"]
     logger.info(f"Starting uvicorn server on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info", limit_concurrency=20)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info", limit_concurrency=20, workers=1)
