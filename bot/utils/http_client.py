@@ -285,7 +285,7 @@ def resilient_get(url: str, *, timeout: int = 30,
 
 
 def resilient_download_file(url: str, *, timeout: int = 30,
-                      max_retries: int = 3, max_size: int = 10 * 1024 * 1024) -> requests.Response:
+                      max_retries: int = 3, max_size: int = 5 * 1024 * 1024) -> requests.Response:
     """
     Fetch a file (PDF or Image) URL with bypass strategies and memory limit enforcement.
     """
@@ -303,13 +303,15 @@ def resilient_download_file(url: str, *, timeout: int = 30,
                 if resp.status_code != 403:
                     resp.raise_for_status()
                     
-                    content = bytearray()
+                    chunks = []
+                    current_size = 0
                     for chunk in resp.iter_content(chunk_size=8192):
                         if chunk:
-                            content.extend(chunk)
-                            if len(content) > max_size:
+                            chunks.append(chunk)
+                            current_size += len(chunk)
+                            if current_size > max_size:
                                 raise ValueError(f"File exceeds maximum allowed size of {max_size} bytes")
-                    resp._content = bytes(content)
+                    resp._content = b"".join(chunks)
                     
                     logger.info(f"File fetched securely via requests (attempt {attempt})")
                     return resp
@@ -339,18 +341,21 @@ def resilient_download_file(url: str, *, timeout: int = 30,
                 resp = cffi_requests.get(url, **kwargs)
                 resp.raise_for_status()
                 
-                content = bytearray()
+                chunks = []
+                current_size = 0
                 for chunk in resp.iter_content(chunk_size=8192):
                     if chunk:
-                        content.extend(chunk)
-                        if len(content) > max_size:
+                        chunks.append(chunk)
+                        current_size += len(chunk)
+                        if current_size > max_size:
                             raise ValueError(f"File exceeds maximum allowed size of {max_size} bytes")
                 
+                final_content = b"".join(chunks)
                 # Mock the content property for downstream consumers
-                resp._content = bytes(content)
+                resp._content = final_content
                 # Some curl_cffi versions might use content property setter differently, so we ensure it's accessible
                 try:
-                    resp.content = bytes(content)
+                    resp.content = final_content
                 except AttributeError:
                     pass
                     

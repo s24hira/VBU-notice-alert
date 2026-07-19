@@ -25,13 +25,13 @@ class BotHandlers:
     def __init__(self, bot, storage):
         self.bot = bot
         self.storage = storage
-        self._rate_limit = TTLCache(maxsize=10_000, ttl=60)
+        self._rate_limit = TTLCache(maxsize=200, ttl=60)
         self._known_users = set()
-        self._user_is_existing = TTLCache(maxsize=10_000, ttl=7200)
-        self._setup_state = TTLCache(maxsize=1_000, ttl=600)
+        self._user_is_existing = TTLCache(maxsize=100, ttl=1800)
+        self._setup_state = TTLCache(maxsize=50, ttl=300)
         # Bounded TTL caches — prevent unbounded memory growth over time.
-        # Entries expire after 2 hours; at most 10 000 concurrent users cached.
-        self._user_cache = TTLCache(maxsize=10_000, ttl=7200)
+        # Entries expire after 30 mins; at most 100 concurrent users cached to save idle RAM.
+        self._user_cache = TTLCache(maxsize=100, ttl=1800)
         self.setup_commands()
 
     def _is_rate_limited(self, chat_id, max_calls=5, window_seconds=60):

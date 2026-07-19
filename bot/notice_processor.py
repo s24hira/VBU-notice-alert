@@ -19,7 +19,7 @@ class NoticeProcessor:
         self.summarizer = summarizer
         self.storage = storage
         self.website_url = website_url
-        self.MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+        self.MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
         self.ALLOWED_DOMAINS = [
             'visvabharati.ac.in',
             'visvabharati.samarth.edu.in',
@@ -204,6 +204,7 @@ Link: {notice['link']}
                         logger.info(f"Generating summary using Gemini (MIME: {mime_type})")
                         try:
                             extraction = self.summarizer.summarize_document(file_bytes, mime_type=mime_type)
+                            del file_bytes # Free immediately after use
                         except SummarizationError:
                             logger.exception("Summarization failed")
                             logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to summarization failure.")

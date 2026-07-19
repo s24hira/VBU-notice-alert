@@ -137,14 +137,13 @@ class VBUNoticeBot:
 
             self._check_count += 1
 
-            # Recycle the Supabase client every 6 cycles (~3 hours)
-            # to flush accumulated httpx connection pool / SSL state
-            if self._check_count % 6 == 0:
-                logger.info("Recycling Supabase client connection pool")
-                self.storage.reconnect()
+            # Aggressively recycle HTTP clients and Supabase connections every cycle
+            # to ensure zero idle connections and minimize idle memory bloat
+            logger.info("Recycling Supabase client connection pool")
+            self.storage.reconnect()
 
-                logger.info("Recycling HTTP client connection pools")
-                reset_sessions()
+            logger.info("Recycling HTTP client connection pools")
+            reset_sessions()
 
             # Force glibc to return freed memory to OS
             release_memory()
@@ -152,7 +151,7 @@ class VBUNoticeBot:
 
 # Global variables for FastAPI lifecycle
 bot_instance = None
-executor = ThreadPoolExecutor()
+executor = ThreadPoolExecutor(max_workers=2)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -267,4 +266,4 @@ async def handle_webhook(request: Request):
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 8000))
     logger.info(f"Starting uvicorn server on port {port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info", limit_concurrency=20)
