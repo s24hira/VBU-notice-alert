@@ -267,7 +267,10 @@ def _get_github_proxies():
                     lines = r.text.strip().split('\n')
                     for line in lines:
                         proxy_ip = line.strip()
-                        if proxy_ip and ':' in proxy_ip:
+                        if '://' in proxy_ip:
+                            proto, addr = proxy_ip.split('://', 1)
+                            all_proxies.append((proto.lower(), addr))
+                        elif proxy_ip and ':' in proxy_ip:
                             all_proxies.append((protocol, proxy_ip))
             except Exception as e:
                 logger.error(f"Failed to fetch {protocol} proxies: {e}")
@@ -283,22 +286,34 @@ def _try_proxy_list(url: str, timeout: int = 30) -> requests.Response | None:
     if not proxies_list:
         return None
     
-    # Pick 5 random proxies to try per attempt to avoid hanging too long
     import random
-    samples = random.sample(proxies_list, min(5, len(proxies_list)))
-    
-    for protocol, proxy_ip in samples:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Sample 50 proxies to test in parallel
+    samples = random.sample(proxies_list, min(50, len(proxies_list)))
+
+    def _test_proxy(item):
+        protocol, proxy_ip = item
         proxies = {
             "http": f"{protocol}://{proxy_ip}",
             "https": f"{protocol}://{proxy_ip}"
         }
         try:
-            r = requests.get(url, timeout=timeout, proxies=proxies, verify=certifi.where())
+            # Use 6s timeout per proxy to fail fast on dead/slow ones
+            r = requests.get(url, timeout=6, proxies=proxies, verify=certifi.where())
             if r.status_code == 200:
-                logger.info(f"Successfully connected using proxy {proxy_ip} ({protocol})")
-                return r
+                return r, proxy_ip, protocol
         except Exception:
             pass
+        return None, proxy_ip, protocol
+
+    with ThreadPoolExecutor(max_workers=25) as executor:
+        futures = [executor.submit(_test_proxy, sample) for sample in samples]
+        for future in as_completed(futures):
+            resp, proxy_ip, protocol = future.result()
+            if resp is not None:
+                logger.info(f"Successfully connected using proxy {proxy_ip} ({protocol})")
+                return resp
             
     logger.warning("proxy_list strategy failed to find a working proxy in this batch")
     return None
