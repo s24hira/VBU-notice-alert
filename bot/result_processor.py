@@ -168,7 +168,7 @@ class ResultProcessor:
 
         return None, None
 
-    def send_telegram_alerts(self, bot, result, summary_text, user_ids):
+    def send_telegram_alerts(self, bot, result, user_ids):
         for user_id in user_ids:
             try:
                 date_str = result['date'].strftime('%b %d, %Y') if isinstance(result.get('date'), datetime.date) else "N/A"
@@ -187,18 +187,6 @@ Date: {date_str}
 Link: {result['link']}
                 """
                 bot.send_message(user_id, alert_message)
-
-                if summary_text:
-                    safe_summary = summary_text
-                    if len(safe_summary) > 3900:
-                        safe_summary = safe_summary[:3900] + "..."
-                        
-                    summary_message = f"""
-✨ AI Summary:
-
-{safe_summary}
-                    """
-                    bot.send_message(user_id, summary_message)
 
             except Exception:
                 logger.exception(f"Telegram message send error to user {user_id}")
@@ -246,7 +234,7 @@ Link: {result['link']}
                         matching_users = self.storage.get_matching_subscribers(result_data)
                         logger.info(f"Sending alerts to {len(matching_users)} matched users")
                         
-                        self.send_telegram_alerts(bot, result, result_data['summary'], matching_users)
+                        self.send_telegram_alerts(bot, result, matching_users)
                         # Update status to 'Sent'
                         self.storage.update_notice_status(added_record['id'], 'Sent')
                         logger.info("Result processed successfully")

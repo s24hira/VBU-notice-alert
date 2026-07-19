@@ -192,6 +192,7 @@ Link: {notice['link']}
                     logger.info(f"Processing notice: {notice['title']}")
                     file_bytes, mime_type = self.download_file(notice['link'])
                     
+                    pdf_processed = False
                     if not file_bytes or not mime_type:
                         logger.info(f"File unavailable for '{notice['title']}'. Falling back to text categorization.")
                         try:
@@ -205,6 +206,7 @@ Link: {notice['link']}
                         try:
                             extraction = self.summarizer.summarize_document(file_bytes, mime_type=mime_type)
                             del file_bytes # Free immediately after use
+                            pdf_processed = True
                         except SummarizationError:
                             logger.exception("Summarization failed")
                             logger.warning(f"Strict requirement not met: Skipping notice '{notice['title']}' due to summarization failure.")
@@ -237,7 +239,7 @@ Link: {notice['link']}
                         matching_users = self.storage.get_matching_subscribers(notice_data)
                         logger.info(f"Sending alerts to {len(matching_users)} matched users")
                         
-                        self.send_telegram_alerts(bot, notice, notice_data['summary'], matching_users)
+                        self.send_telegram_alerts(bot, notice, notice_data['summary'] if pdf_processed else None, matching_users)
                         # Update status to 'Sent' after successfully sending alerts
                         self.storage.update_notice_status(added_record['id'], 'Sent')
                         logger.info("Notice processed successfully")
