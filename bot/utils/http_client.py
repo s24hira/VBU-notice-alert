@@ -238,6 +238,66 @@ def _try_session_warmup(url: str, timeout: int = 30) -> requests.Response | None
 
 
 # ---------------------------------------------------------------------------
+# Strategy 4 - Proxy List from GitHub
+# ---------------------------------------------------------------------------
+_proxy_list_cache = []
+_proxy_list_last_fetched = 0
+
+def _get_github_proxies():
+    global _proxy_list_cache, _proxy_list_last_fetched
+    now = time.time()
+    if not _proxy_list_cache or (now - _proxy_list_last_fetched > 1800):
+        urls = [
+            ("http", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/http.txt"),
+            ("http", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/https.txt"),
+            ("socks4", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/socks4.txt"),
+            ("socks5", "https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/socks5.txt")
+        ]
+        all_proxies = []
+        for protocol, url in urls:
+            try:
+                r = requests.get(url, timeout=10)
+                if r.status_code == 200:
+                    lines = r.text.strip().split('\n')
+                    for line in lines:
+                        proxy_ip = line.strip()
+                        if proxy_ip and ':' in proxy_ip:
+                            all_proxies.append((protocol, proxy_ip))
+            except Exception as e:
+                logger.error(f"Failed to fetch {protocol} proxies: {e}")
+                
+        if all_proxies:
+            _proxy_list_cache = all_proxies
+            _proxy_list_last_fetched = now
+            logger.info(f"Fetched {len(all_proxies)} total proxies from GitHub.")
+    return _proxy_list_cache
+
+def _try_proxy_list(url: str, timeout: int = 30) -> requests.Response | None:
+    proxies_list = _get_github_proxies()
+    if not proxies_list:
+        return None
+    
+    # Pick 5 random proxies to try per attempt to avoid hanging too long
+    import random
+    samples = random.sample(proxies_list, min(5, len(proxies_list)))
+    
+    for protocol, proxy_ip in samples:
+        proxies = {
+            "http": f"{protocol}://{proxy_ip}",
+            "https": f"{protocol}://{proxy_ip}"
+        }
+        try:
+            r = requests.get(url, timeout=timeout, proxies=proxies, verify=certifi.where())
+            if r.status_code == 200:
+                logger.info(f"Successfully connected using proxy {proxy_ip} ({protocol})")
+                return r
+        except Exception:
+            pass
+            
+    logger.warning("proxy_list strategy failed to find a working proxy in this batch")
+    return None
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def resilient_get(url: str, *, timeout: int = 30,
@@ -261,7 +321,8 @@ def resilient_get(url: str, *, timeout: int = 30,
         ("cloudscraper", _try_cloudscraper),
         ("curl_cffi", _try_curl_cffi),
         ("session_warmup", _try_session_warmup),
-        ("plain_requests", _try_plain_requests)
+        ("plain_requests", _try_plain_requests),
+        ("proxy_list", _try_proxy_list)
     ]
 
     last_error: Exception | None = None
@@ -378,7 +439,40 @@ def resilient_download_file(url: str, *, timeout: int = 30,
                 raise requests.HTTPError(str(ve))
             except Exception as e:
                 logger.debug(f"curl_cffi file fetch failed: {e}")
-                raise e # re-raise to trigger retry logic
+                last_error = e
+
+            # 3. Fallback Strategy: Proxy List
+            proxies_list = _get_github_proxies()
+            if proxies_list:
+                import random
+                samples = random.sample(proxies_list, min(3, len(proxies_list)))
+                for protocol, proxy_ip in samples:
+                    proxy_dict = {"http": f"{protocol}://{proxy_ip}", "https": f"{protocol}://{proxy_ip}"}
+                    try:
+                        resp = requests.get(url, headers=headers, timeout=timeout,
+                                            proxies=proxy_dict, verify=certifi.where(), stream=True)
+                        if resp.status_code == 200:
+                            chunks = []
+                            current_size = 0
+                            for chunk in resp.iter_content(chunk_size=8192):
+                                if chunk:
+                                    chunks.append(chunk)
+                                    current_size += len(chunk)
+                                    if current_size > max_size:
+                                        raise ValueError(f"File exceeds maximum allowed size of {max_size} bytes")
+                            resp._content = b"".join(chunks)
+                            logger.info(f"File fetched via proxy {proxy_ip} ({protocol}) (attempt {attempt})")
+                            return resp
+                    except ValueError as ve:
+                        logger.error(str(ve))
+                        raise requests.HTTPError(str(ve))
+                    except Exception:
+                        pass
+
+            logger.warning(f"File download attempt {attempt} failed: "
+                           f"{type(last_error).__name__ if last_error else 'Unknown'}")
+            if attempt < max_retries:
+                time.sleep(min(2 ** attempt + random.uniform(0, 1), 10))
 
         except Exception as exc:
             last_error = exc
