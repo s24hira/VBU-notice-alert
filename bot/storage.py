@@ -114,20 +114,27 @@ class SupabaseStorage:
             logger.error(f"Error fetching matching subscribers: {type(e).__name__}")
             return self.get_all_users() # Fallback to all if filtering fails
 
+    def is_notice_exists(self, title: str, link: str) -> bool:
+        """Check if a notice or result already exists in the database by title or link."""
+        try:
+            if not title and not link:
+                return False
+            safe_title = (title or '').replace('"', '\\"')
+            safe_link = (link or '').replace('"', '\\"')
+            
+            duplicate = self.supabase.table('notices').select('id').or_(f'title.eq."{safe_title}",link.eq."{safe_link}"').execute()
+            return bool(duplicate.data)
+        except Exception as e:
+            logger.error(f"Error checking if notice exists: {type(e).__name__}")
+            return False
+
     # Notice management
     def add_notice(self, notice_data):
         try:
             title = notice_data.get('title', '')
             link = notice_data.get('link', '')
 
-            # Escape double quotes to prevent filter injection
-            safe_title = title.replace('"', '\\"')
-            safe_link = link.replace('"', '\\"')
-            
-            # Check if notice already exists by title or link using a single OR query
-            duplicate = self.supabase.table('notices').select('id').or_(f'title.eq."{safe_title}",link.eq."{safe_link}"').execute()
-            
-            if duplicate.data:
+            if self.is_notice_exists(title, link):
                 logger.info(f"Notice '{title}' already exists. Skipping.")
                 return None
 

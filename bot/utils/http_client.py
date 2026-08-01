@@ -249,20 +249,13 @@ def _get_github_proxies():
     if not _proxy_list_cache or (now - _proxy_list_last_fetched > 1800):
         urls = [
             ("http", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"),
-            ("socks4", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt"),
-            ("socks5", "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt"),
-            ("http", "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt"),
-            ("https", "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/https.txt"),
             ("http", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/http/data.txt"),
-            ("socks4", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks4/data.txt"),
             ("socks5", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/socks5/data.txt"),
-            ("http", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/all/data.txt"),
-            ("http", "https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/countries/US/data.txt")
         ]
         all_proxies = []
         for protocol, url in urls:
             try:
-                r = requests.get(url, timeout=10)
+                r = requests.get(url, timeout=3)
                 if r.status_code == 200:
                     lines = r.text.strip().split('\n')
                     for line in lines:
@@ -273,7 +266,7 @@ def _get_github_proxies():
                         elif proxy_ip and ':' in proxy_ip:
                             all_proxies.append((protocol, proxy_ip))
             except Exception as e:
-                logger.error(f"Failed to fetch {protocol} proxies: {e}")
+                logger.debug(f"Failed to fetch {protocol} proxies: {e}")
                 
         if all_proxies:
             _proxy_list_cache = all_proxies
@@ -287,10 +280,10 @@ def _try_proxy_list(url: str, timeout: int = 30) -> requests.Response | None:
         return None
     
     import random
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
-    # Sample 50 proxies to test in parallel
-    samples = random.sample(proxies_list, min(50, len(proxies_list)))
+    # Sample 10 proxies to test in parallel with fast timeouts
+    samples = random.sample(proxies_list, min(10, len(proxies_list)))
 
     def _test_proxy(item):
         protocol, proxy_ip = item
@@ -299,21 +292,26 @@ def _try_proxy_list(url: str, timeout: int = 30) -> requests.Response | None:
             "https": f"{protocol}://{proxy_ip}"
         }
         try:
-            # Use 6s timeout per proxy to fail fast on dead/slow ones
-            r = requests.get(url, timeout=6, proxies=proxies, verify=certifi.where())
+            # Fast 3s timeout per proxy
+            r = requests.get(url, timeout=3, proxies=proxies, verify=certifi.where())
             if r.status_code == 200:
                 return r, proxy_ip, protocol
         except Exception:
             pass
         return None, proxy_ip, protocol
 
-    with ThreadPoolExecutor(max_workers=25) as executor:
-        futures = [executor.submit(_test_proxy, sample) for sample in samples]
-        for future in as_completed(futures):
-            resp, proxy_ip, protocol = future.result()
-            if resp is not None:
-                logger.info(f"Successfully connected using proxy {proxy_ip} ({protocol})")
-                return resp
+    try:
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(_test_proxy, sample) for sample in samples]
+            for future in as_completed(futures, timeout=5):
+                resp, proxy_ip, protocol = future.result()
+                if resp is not None:
+                    logger.info(f"Successfully connected using proxy {proxy_ip} ({protocol})")
+                    return resp
+    except TimeoutError:
+        logger.debug("proxy_list strategy timed out overall after 5s")
+    except Exception as e:
+        logger.debug(f"proxy_list execution error: {e}")
             
     logger.warning("proxy_list strategy failed to find a working proxy in this batch")
     return None

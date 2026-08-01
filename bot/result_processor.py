@@ -114,8 +114,8 @@ class ResultProcessor:
 
             return new_results
 
-        except Exception:
-            logger.exception("Error scraping results after all bypass strategies")
+        except Exception as e:
+            logger.warning(f"Unable to scrape results from {self.website_url}: {e}")
                 
         return []
 
@@ -200,6 +200,10 @@ Link: {result['link']}
 
             for result in new_results:
                 try:
+                    if self.storage.is_notice_exists(result['title'], result['link']):
+                        logger.info(f"Result '{result['title']}' already exists in database. Skipping categorization.")
+                        continue
+
                     logger.info(f"Processing result: {result['title']}")
 
                     try:

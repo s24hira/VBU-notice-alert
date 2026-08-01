@@ -189,6 +189,10 @@ Link: {notice['link']}
 
             for notice in new_notices:
                 try:
+                    if self.storage.is_notice_exists(notice['title'], notice['link']):
+                        logger.info(f"Notice '{notice['title']}' already exists in database. Skipping download/summarization.")
+                        continue
+
                     logger.info(f"Processing notice: {notice['title']}")
                     file_bytes, mime_type = self.download_file(notice['link'])
                     
