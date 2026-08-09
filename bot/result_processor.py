@@ -198,6 +198,9 @@ Link: {result['link']}
             new_results = self.scrape_results(existing_titles, existing_urls)
             logger.info(f"Found {len(new_results)} new results")
 
+            if new_results:
+                self.summarizer.reset_model_index()
+
             for result in new_results:
                 try:
                     if self.storage.is_notice_exists(result['title'], result['link']):

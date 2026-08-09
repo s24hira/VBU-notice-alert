@@ -228,18 +228,25 @@ class NoticeExtraction(BaseModel):
         return self
 
 class GeminiPDFSummarizer:
-    def __init__(self, api_key):
+    def __init__(self, api_key, models=None):
         """
         Initialize Gemini PDF Summarizer
         """
         self.api_key = api_key
-        self.models = ['gemini-3.5-flash', 'gemini-3-flash-preview', 'gemini-3.1-flash-lite']
+        self.models = models or ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3-flash-preview']
         self.current_model_index = 0
         self._model_lock = threading.Lock()
         self._headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": self.api_key
         }
+
+    def reset_model_index(self):
+        """
+        Reset model rotation index to 0 so the highest priority model (gemini-3.6-flash) is used first.
+        """
+        with self._model_lock:
+            self.current_model_index = 0
 
         # Pre-compute Gemini schema
         schema = NoticeExtraction.model_json_schema()

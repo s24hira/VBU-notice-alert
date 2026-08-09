@@ -187,6 +187,9 @@ Link: {notice['link']}
             new_notices = self.scrape_notices(existing_titles, existing_urls)
             logger.info(f"Found {len(new_notices)} new notices")
 
+            if new_notices:
+                self.summarizer.reset_model_index()
+
             for notice in new_notices:
                 try:
                     if self.storage.is_notice_exists(notice['title'], notice['link']):
