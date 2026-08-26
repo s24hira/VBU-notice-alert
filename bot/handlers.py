@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from cachetools import TTLCache
 from bot.constants import BHAVANAS_LIST, BHAVANA_DEPARTMENTS_MAP
+from bot.utils.validators import validate_name
 
 logger = logging.getLogger(__name__)
 
@@ -163,27 +164,15 @@ class BotHandlers:
                 self.bot.register_next_step_handler(msg, self._save_name_final_handler)
                 return
 
-            name = message.text.strip() if message.text else ""
-            
-            if not name:
-                msg = self.bot.send_message(chat_id, "❌ Name cannot be empty. Please type your name:", reply_markup=ForceReply(selective=True))
-                self.bot.register_next_step_handler(msg, self._save_name_final_handler)
-                return
-
-            if name.startswith('/'):
+            raw_name = message.text if message.text else ""
+            if raw_name.strip().startswith('/'):
                 self._setup_state.pop(chat_id, None)
                 self.bot.send_message(chat_id, "❌ Setup cancelled. You can type /start to try again.")
                 return
 
-            if len(name) > 100:
-                msg = self.bot.send_message(chat_id, "❌ Name is too long (max 100 characters). Please try again:", reply_markup=ForceReply(selective=True))
-                self.bot.register_next_step_handler(msg, self._save_name_final_handler)
-                return
-
-            # Sanitize for Telegram Markdown
-            name = re.sub(r'[*_`\[\]()~<>#+\-=|{}.!]', '', name).strip()
-            if not name:
-                msg = self.bot.send_message(chat_id, "❌ Name contains only special characters. Please enter a valid name:", reply_markup=ForceReply(selective=True))
+            is_valid, sanitized_name, error_msg = validate_name(raw_name)
+            if not is_valid:
+                msg = self.bot.send_message(chat_id, f"❌ {error_msg}\n\nPlease try again:", reply_markup=ForceReply(selective=True))
                 self.bot.register_next_step_handler(msg, self._save_name_final_handler)
                 return
 
@@ -199,7 +188,7 @@ class BotHandlers:
             bhavana = setup_data.get('bhavana')
             department = setup_data.get('department')
             
-            success = self.storage.upsert_subscriber(chat_id, bhavana, department, name, receive_general_notices=True)
+            success = self.storage.upsert_subscriber(chat_id, bhavana, department, sanitized_name, receive_general_notices=True)
             
             if success:
                 self._setup_state.pop(chat_id, None)
@@ -208,10 +197,10 @@ class BotHandlers:
                     'telegram_chat_id': chat_id,
                     'bhavana': bhavana,
                     'department': department,
-                    'name': name,
+                    'name': sanitized_name,
                     'receive_general_notices': True
                 }
-                safe_name = _escape_markdown(name)
+                safe_name = _escape_markdown(sanitized_name)
                 msg_text = (
                     f"✅ **Subscription Confirmed!**\n\n"
                     f"Welcome, **{safe_name}**!\n"
@@ -244,37 +233,26 @@ class BotHandlers:
                 self.bot.register_next_step_handler(msg, self._edit_name_handler)
                 return
 
-            name = message.text.strip() if message.text else ""
-            if not name:
-                msg = self.bot.send_message(chat_id, "❌ Name cannot be empty. Please type your name:", reply_markup=ForceReply(selective=True))
-                self.bot.register_next_step_handler(msg, self._edit_name_handler)
-                return
-
-            if name.startswith('/'):
+            raw_name = message.text if message.text else ""
+            if raw_name.strip().startswith('/'):
                 self._setup_state.pop(chat_id, None)
                 self.bot.send_message(chat_id, "❌ Name change cancelled.")
                 return
 
-            if len(name) > 100:
-                msg = self.bot.send_message(chat_id, "❌ Name is too long (max 100 characters). Please try again:", reply_markup=ForceReply(selective=True))
+            is_valid, sanitized_name, error_msg = validate_name(raw_name)
+            if not is_valid:
+                msg = self.bot.send_message(chat_id, f"❌ {error_msg}\n\nPlease try again:", reply_markup=ForceReply(selective=True))
                 self.bot.register_next_step_handler(msg, self._edit_name_handler)
                 return
 
-            # Sanitize for Telegram Markdown
-            name = re.sub(r'[*_`\[\]()~<>#+\-=|{}.!]', '', name).strip()
-            if not name:
-                msg = self.bot.send_message(chat_id, "❌ Name contains only special characters. Please enter a valid name:", reply_markup=ForceReply(selective=True))
-                self.bot.register_next_step_handler(msg, self._edit_name_handler)
-                return
-
-            success = self.storage.update_subscriber(chat_id, {'name': name})
+            success = self.storage.update_subscriber(chat_id, {'name': sanitized_name})
             self._setup_state.pop(chat_id, None)
 
             if success:
                 sub = self._user_cache.get(chat_id) or self.storage.get_subscriber(chat_id) or {}
-                sub['name'] = name
+                sub['name'] = sanitized_name
                 self._user_cache[chat_id] = sub
-                safe_name = _escape_markdown(name)
+                safe_name = _escape_markdown(sanitized_name)
                 msg_text = (
                     f"✅ **Name Updated!**\n\n"
                     f"Your name has been updated to **{safe_name}**.\n\n"

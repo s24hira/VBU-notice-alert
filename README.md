@@ -169,5 +169,6 @@ The codebase has been hardened against the following:
 | URL allowlist | Outbound requests are restricted to `visvabharati.ac.in`, `visvabharati.samarth.edu.in`, and the exact S3 bucket `samarth-ac.s3.ap-south-1.amazonaws.com`. |
 | TLS | All outbound HTTP requests use `certifi` for certificate verification. `curl_cffi` impersonates Chrome's TLS fingerprint (JA3) for stealth. |
 | Memory | In-memory user caches use `TTLCache(maxsize=10_000, ttl=7200)` to prevent unbounded growth. |
+| Input validation | Centralized validation for user inputs (`name`, `bhavana`, `department`, `receive_general_notices`) enforcing length limits, whitelist verification, and type checking before database writes. |
 | Markdown injection | User-supplied names are sanitized and then escaped before insertion into Markdown messages. |
 | Logging | All `except` blocks use `logger.exception()` to capture full stack traces. |

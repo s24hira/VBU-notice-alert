@@ -4,6 +4,14 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
+from bot.utils.validators import (
+    validate_chat_id,
+    validate_name,
+    validate_bhavana,
+    validate_department,
+    validate_general_notices
+)
+
 logger = logging.getLogger(__name__)
 load_dotenv()
 
@@ -30,11 +38,11 @@ class SupabaseStorage:
 
     # User management
     def add_user(self, chat_id, username=None):
-        # We might not know their selections yet, but we can insert them with defaults or leave them null.
-        # However, the categorisation logic requires them to complete the flow.
-        # This add_user is kept for basic backwards compatibility with ping/status if needed,
-        # but realistically they need to do /start fully.
         try:
+            if not validate_chat_id(chat_id):
+                logger.warning(f"Invalid chat_id {chat_id} rejected in add_user.")
+                return False
+
             # Check if user exists (fetching only the ID instead of all columns)
             response = self.supabase.table('subscribers').select('telegram_chat_id').eq('telegram_chat_id', chat_id).execute()
             if not response.data:
@@ -52,6 +60,19 @@ class SupabaseStorage:
 
     def upsert_subscriber(self, chat_id, bhavana, department, name=None, receive_general_notices=True):
         try:
+            if not validate_chat_id(chat_id):
+                logger.warning(f"Invalid chat_id {chat_id} in upsert_subscriber.")
+                return False
+            if not validate_bhavana(bhavana):
+                logger.warning(f"Invalid bhavana '{bhavana}' in upsert_subscriber.")
+                return False
+            if not validate_department(bhavana, department):
+                logger.warning(f"Invalid department '{department}' for bhavana '{bhavana}' in upsert_subscriber.")
+                return False
+            if not validate_general_notices(receive_general_notices):
+                logger.warning(f"Invalid receive_general_notices value in upsert_subscriber.")
+                return False
+
             payload = {
                 'telegram_chat_id': chat_id,
                 'bhavana': bhavana,
@@ -59,7 +80,11 @@ class SupabaseStorage:
                 'receive_general_notices': receive_general_notices
             }
             if name:
-                payload['name'] = name
+                is_valid, sanitized_name, err = validate_name(name)
+                if not is_valid:
+                    logger.warning(f"Invalid name '{name}' in upsert_subscriber: {err}")
+                    return False
+                payload['name'] = sanitized_name
                 
             self.supabase.table('subscribers').upsert(payload).execute()
             logger.info(f"Subscriber {chat_id} upserted with selections: {bhavana}, {department}, name: {name}, receive_general_notices: {receive_general_notices}.")
@@ -69,10 +94,44 @@ class SupabaseStorage:
             return False
 
     def update_subscriber(self, chat_id, updates: dict):
-        """Update specific fields for an existing subscriber with strict field whitelisting."""
+        """Update specific fields for an existing subscriber with strict validation and field whitelisting."""
         try:
-            # Whitelist allowed fields for security
-            sanitized_payload = {k: v for k, v in updates.items() if k in self.ALLOWED_SUBSCRIBER_FIELDS}
+            if not validate_chat_id(chat_id):
+                logger.warning(f"Invalid chat_id {chat_id} in update_subscriber.")
+                return False
+
+            sanitized_payload = {}
+            for k, v in updates.items():
+                if k not in self.ALLOWED_SUBSCRIBER_FIELDS:
+                    continue
+
+                if k == 'name':
+                    is_valid, sanitized_name, err = validate_name(v)
+                    if not is_valid:
+                        logger.warning(f"Invalid name in update_subscriber for {chat_id}: {err}")
+                        return False
+                    sanitized_payload['name'] = sanitized_name
+                elif k == 'bhavana':
+                    if not validate_bhavana(v):
+                        logger.warning(f"Invalid bhavana '{v}' in update_subscriber for {chat_id}.")
+                        return False
+                    sanitized_payload['bhavana'] = v
+                elif k == 'department':
+                    # If bhavana is also being updated, validate against it
+                    target_bhavana = updates.get('bhavana')
+                    if not target_bhavana:
+                        sub = self.get_subscriber(chat_id)
+                        target_bhavana = sub.get('bhavana') if sub else None
+                    if target_bhavana and not validate_department(target_bhavana, v):
+                        logger.warning(f"Invalid department '{v}' for bhavana '{target_bhavana}' in update_subscriber for {chat_id}.")
+                        return False
+                    sanitized_payload['department'] = v
+                elif k == 'receive_general_notices':
+                    if not validate_general_notices(v):
+                        logger.warning(f"Invalid receive_general_notices value in update_subscriber for {chat_id}.")
+                        return False
+                    sanitized_payload['receive_general_notices'] = v
+
             if not sanitized_payload:
                 logger.warning(f"No valid fields to update for subscriber {chat_id}.")
                 return False
