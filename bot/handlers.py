@@ -68,13 +68,35 @@ class BotHandlers:
             return func(message)
         return wrapper
 
-    def _build_settings_keyboard(self):
+    def _build_settings_text(self, sub=None):
+        sub = sub or {}
+        name = sub.get('name')
+        name_str = f" for **{_escape_markdown(name)}**" if name else ""
+        return (
+            f"🔧 **Settings**{name_str}\n\n"
+            f"Tap any preference button below to edit:"
+        )
+
+    def _build_settings_keyboard(self, sub=None):
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🔄 Reset Subscription", callback_data="SETTINGS_RESET"))
+        sub = sub or {}
+        name = sub.get('name', 'Edit')
+        bhavana = sub.get('bhavana', 'Edit')
+        department = sub.get('department', 'Edit')
+        gen_enabled = sub.get('receive_general_notices', True)
+        gen_status = "✅ ON" if gen_enabled else "❌ OFF"
+
+        def _trunc(text, max_len=28):
+            return text if len(text) <= max_len else text[:max_len - 3] + "..."
+
+        markup.add(InlineKeyboardButton(f"👤 Name: {_trunc(name)}", callback_data="SETTING_NAME"))
+        markup.add(InlineKeyboardButton(f"🏛️ Bhavana: {_trunc(bhavana)}", callback_data="SETTING_BHAVANA"))
+        markup.add(InlineKeyboardButton(f"📚 Department: {_trunc(department)}", callback_data="SETTING_DEPT"))
+        markup.add(InlineKeyboardButton(f"📢 General Notices: {gen_status}", callback_data="SETTING_TOGGLE_GEN"))
         markup.add(InlineKeyboardButton("🗑️ Delete Account", callback_data="SETTINGS_DELETE_CONFIRM"))
         return markup
 
-    def _build_bhavana_keyboard(self, page=0, show_cancel=False):
+    def _build_bhavana_keyboard(self, page=0, show_cancel=False, cancel_callback="CANCEL"):
         markup = InlineKeyboardMarkup(row_width=1)
         start_idx = page * ITEMS_PER_PAGE
         end_idx = start_idx + ITEMS_PER_PAGE
@@ -94,10 +116,11 @@ class BotHandlers:
             markup.add(*nav_buttons)
             
         if show_cancel:
-            markup.add(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL"))
+            btn_text = "🔙 Back to Settings" if cancel_callback == "SETTINGS_BACK" else "❌ Cancel"
+            markup.add(InlineKeyboardButton(btn_text, callback_data=cancel_callback))
         return markup
 
-    def _build_dept_keyboard(self, bhav_idx, page=0, show_cancel=False):
+    def _build_dept_keyboard(self, bhav_idx, page=0, show_cancel=False, cancel_callback="CANCEL", back_callback="START"):
         markup = InlineKeyboardMarkup(row_width=1)
         bhavana_name = BHAVANAS_LIST[bhav_idx]
         depts = BHAVANA_DEPARTMENTS_MAP[bhavana_name]
@@ -122,10 +145,13 @@ class BotHandlers:
         if nav_buttons:
             markup.add(*nav_buttons)
             
-        # Add back button to bhavanas
-        markup.add(InlineKeyboardButton("🔙 Back to Institutes", callback_data="START"))
+        # Add back button
+        if back_callback:
+            back_text = "🔙 Back to Bhavanas" if back_callback == "START" else "🔙 Back to Bhavana"
+            markup.add(InlineKeyboardButton(back_text, callback_data=back_callback))
         if show_cancel:
-            markup.add(InlineKeyboardButton("❌ Cancel", callback_data="CANCEL"))
+            btn_text = "🔙 Back to Settings" if cancel_callback == "SETTINGS_BACK" else "❌ Cancel"
+            markup.add(InlineKeyboardButton(btn_text, callback_data=cancel_callback))
         return markup
 
     def _save_name_final_handler(self, message):
@@ -145,6 +171,7 @@ class BotHandlers:
                 return
 
             if name.startswith('/'):
+                self._setup_state.pop(chat_id, None)
                 self.bot.send_message(chat_id, "❌ Setup cancelled. You can type /start to try again.")
                 return
 
@@ -165,14 +192,14 @@ class BotHandlers:
             if not setup_data or not setup_data.get('bhavana') or not setup_data.get('department'):
                 self.bot.send_message(
                     chat_id, 
-                    "❌ Oops! We lost track of your Institute and Department selection. Please type /start to try again. 🙏"
+                    "❌ Oops! We lost track of your Bhavana and Department selection. Please type /start to try again. 🙏"
                 )
                 return
 
             bhavana = setup_data.get('bhavana')
             department = setup_data.get('department')
             
-            success = self.storage.upsert_subscriber(chat_id, bhavana, department, name)
+            success = self.storage.upsert_subscriber(chat_id, bhavana, department, name, receive_general_notices=True)
             
             if success:
                 self._setup_state.pop(chat_id, None)
@@ -181,7 +208,8 @@ class BotHandlers:
                     'telegram_chat_id': chat_id,
                     'bhavana': bhavana,
                     'department': department,
-                    'name': name
+                    'name': name,
+                    'receive_general_notices': True
                 }
                 safe_name = _escape_markdown(name)
                 msg_text = (
@@ -189,8 +217,9 @@ class BotHandlers:
                     f"Welcome, **{safe_name}**!\n"
                     f"You will now receive targeted notices for:\n"
                     f"🏛️ Bhavana: {bhavana}\n"
-                    f"📚 Department: {department}\n\n"
-                    f"_(Use /settings to change this at any time)_"
+                    f"📚 Department: {department}\n"
+                    f"📢 General Notices: ✅ Enabled\n\n"
+                    f"_(Use /settings to change preferences at any time)_"
                 )
             else:
                 msg_text = "❌ Oops! We had a small hiccup while saving your subscription. Please type /start to try again. 🙏"
@@ -206,6 +235,65 @@ class BotHandlers:
                 chat_id, 
                 "❌ An unexpected error occurred. Please try again later."
             )
+
+    def _edit_name_handler(self, message):
+        chat_id = message.chat.id
+        try:
+            if message.content_type != 'text':
+                msg = self.bot.send_message(chat_id, "❌ Please send your name as a text message:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._edit_name_handler)
+                return
+
+            name = message.text.strip() if message.text else ""
+            if not name:
+                msg = self.bot.send_message(chat_id, "❌ Name cannot be empty. Please type your name:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._edit_name_handler)
+                return
+
+            if name.startswith('/'):
+                self._setup_state.pop(chat_id, None)
+                self.bot.send_message(chat_id, "❌ Name change cancelled.")
+                return
+
+            if len(name) > 100:
+                msg = self.bot.send_message(chat_id, "❌ Name is too long (max 100 characters). Please try again:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._edit_name_handler)
+                return
+
+            # Sanitize for Telegram Markdown
+            name = re.sub(r'[*_`\[\]()~<>#+\-=|{}.!]', '', name).strip()
+            if not name:
+                msg = self.bot.send_message(chat_id, "❌ Name contains only special characters. Please enter a valid name:", reply_markup=ForceReply(selective=True))
+                self.bot.register_next_step_handler(msg, self._edit_name_handler)
+                return
+
+            success = self.storage.update_subscriber(chat_id, {'name': name})
+            self._setup_state.pop(chat_id, None)
+
+            if success:
+                sub = self._user_cache.get(chat_id) or self.storage.get_subscriber(chat_id) or {}
+                sub['name'] = name
+                self._user_cache[chat_id] = sub
+                safe_name = _escape_markdown(name)
+                msg_text = (
+                    f"✅ **Name Updated!**\n\n"
+                    f"Your name has been updated to **{safe_name}**.\n\n"
+                    + self._build_settings_text(sub)
+                )
+                self.bot.send_message(
+                    chat_id,
+                    msg_text,
+                    reply_markup=self._build_settings_keyboard(sub),
+                    parse_mode="Markdown"
+                )
+            else:
+                self.bot.send_message(
+                    chat_id,
+                    "❌ Oops! Could not update your name. Please try again via /settings."
+                )
+        except Exception:
+            logger.exception(f"Error in _edit_name_handler for user {chat_id}")
+            self.bot.send_message(chat_id, "❌ An unexpected error occurred. Please try again later.")
 
     def setup_commands(self):
         @self.bot.message_handler(commands=['start'])
@@ -223,12 +311,15 @@ class BotHandlers:
             self._user_is_existing[chat_id] = is_existing
             
             if is_existing:
+                safe_name = _escape_markdown(sub.get('name', 'User'))
+                gen_status = "✅ Enabled" if sub.get('receive_general_notices', True) else "❌ Disabled"
                 msg_text = (
                     f"👋 You are already subscribed to VBU notice alerts!\n\n"
                     f"**Current Configuration:**\n"
-                    f"👤 **Name:** {sub['name']}\n"
+                    f"👤 **Name:** {safe_name}\n"
                     f"🏛️ **Bhavana:** {sub['bhavana']}\n"
-                    f"📚 **Department:** {sub['department']}\n\n"
+                    f"📚 **Department:** {sub['department']}\n"
+                    f"📢 **General Notices:** {gen_status}\n\n"
                     f"If you wish to change your configuration, please use /settings"
                 )
                 self.bot.send_message(chat_id, msg_text, parse_mode="Markdown")
@@ -236,7 +327,7 @@ class BotHandlers:
             
             # Start the setup flow directly if they are new or incomplete
             self._setup_state[chat_id] = {'initiator_id': message.from_user.id}
-            msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease select your **Institute (Bhavana)** to begin:"
+            msg_text = "👋 Welcome to the Visva-Bharati Notice Bot!\n\nPlease select your **Bhavana** to begin:"
             self.bot.send_message(
                 chat_id, 
                 msg_text, 
@@ -266,21 +357,16 @@ class BotHandlers:
                 )
                 return
 
-            name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
-            msg_text = (
-                f"🔧 **Settings**{name_str}\n\n"
-                f"What would you like to do?"
-            )
-            
             # Track who opened the settings menu for group chat auth
             state = self._setup_state.get(chat_id, {})
             state['initiator_id'] = message.from_user.id
             self._setup_state[chat_id] = state
 
+            msg_text = self._build_settings_text(sub)
             self.bot.send_message(
                 chat_id,
                 msg_text,
-                reply_markup=self._build_settings_keyboard(),
+                reply_markup=self._build_settings_keyboard(sub),
                 parse_mode="Markdown"
             )
 
@@ -333,7 +419,7 @@ class BotHandlers:
                 if data == "START":
                     chat_id = call.message.chat.id
                     is_existing = self._user_is_existing.get(chat_id, False)
-                    msg_text = "Please select your **Institute (Bhavana)**:"
+                    msg_text = "Please select your **Bhavana**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=call.message.message_id,
@@ -353,12 +439,15 @@ class BotHandlers:
                             self._user_cache[chat_id] = sub
                             
                     if sub and sub.get('bhavana') and sub.get('department') and sub.get('name'):
+                        safe_name = _escape_markdown(sub.get('name', 'User'))
+                        gen_status = "✅ Enabled" if sub.get('receive_general_notices', True) else "❌ Disabled"
                         msg_text = (
                             f"❌ **Settings change cancelled.**\n\n"
                             f"**Current Configuration:**\n"
-                            f"👤 **Name:** {sub['name']}\n"
+                            f"👤 **Name:** {safe_name}\n"
                             f"🏛️ **Bhavana:** {sub['bhavana']}\n"
-                            f"📚 **Department:** {sub['department']}"
+                            f"📚 **Department:** {sub['department']}\n"
+                            f"📢 **General Notices:** {gen_status}"
                         )
                     else:
                         msg_text = "❌ **Setup cancelled.**\n\nYou can use /start to configure your subscription."
@@ -371,19 +460,115 @@ class BotHandlers:
                     )
                     return
 
-                # ── Settings: Reset ───────────────────────────────────────────
-                if data == "SETTINGS_RESET":
+                # ── Settings: Toggle General Notices ─────────────────────────
+                if data == "SETTING_TOGGLE_GEN":
                     chat_id = call.message.chat.id
-                    # Clear name from state so the name-input step is triggered again, but preserve initiator
-                    self._setup_state[chat_id] = {'initiator_id': call.from_user.id}
-                    self._user_is_existing[chat_id] = True  # Keep cancel button available
+                    sub = self._user_cache.get(chat_id) or self.storage.get_subscriber(chat_id) or {}
+                    current_gen = sub.get('receive_general_notices', True)
+                    new_gen = not bool(current_gen)
+                    
+                    self.storage.update_subscriber(chat_id, {'receive_general_notices': new_gen})
+                    sub['receive_general_notices'] = new_gen
+                    self._user_cache[chat_id] = sub
+                    
+                    status_text = "enabled ✅" if new_gen else "disabled ❌"
+                    self.bot.answer_callback_query(call.id, f"General notices {status_text}")
+                    
                     self.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=call.message.message_id,
-                        text="🔄 **Reset Subscription**\n\nPlease select your **Institute (Bhavana)**:",
-                        reply_markup=self._build_bhavana_keyboard(page=0, show_cancel=True),
+                        text=self._build_settings_text(sub),
+                        reply_markup=self._build_settings_keyboard(sub),
                         parse_mode="Markdown"
                     )
+                    return
+
+                # ── Settings: Edit Name ──────────────────────────────────────
+                if data == "SETTING_NAME":
+                    chat_id = call.message.chat.id
+                    sub = self._user_cache.get(chat_id) or self.storage.get_subscriber(chat_id) or {}
+                    safe_name = _escape_markdown(sub.get('name', 'User'))
+                    
+                    self._setup_state[chat_id] = {
+                        'editing': 'name',
+                        'initiator_id': call.from_user.id
+                    }
+                    
+                    cancel_markup = InlineKeyboardMarkup(row_width=1)
+                    cancel_markup.add(InlineKeyboardButton("🔙 Back to Settings", callback_data="SETTINGS_BACK"))
+                    
+                    self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=f"✏️ **Edit Name**\n\nCurrent Name: **{safe_name}**\n\nPlease type your new name below:",
+                        reply_markup=cancel_markup,
+                        parse_mode="Markdown"
+                    )
+                    msg = self.bot.send_message(
+                        chat_id,
+                        "Type your new name:",
+                        reply_markup=ForceReply(selective=True)
+                    )
+                    self.bot.register_next_step_handler(msg, self._edit_name_handler)
+                    return
+
+                # ── Settings: Edit Bhavana ───────────────────────────────────
+                if data == "SETTING_BHAVANA":
+                    chat_id = call.message.chat.id
+                    self._setup_state[chat_id] = {
+                        'editing': 'bhavana',
+                        'initiator_id': call.from_user.id
+                    }
+                    msg_text = "🏛️ **Edit Bhavana**\n\nPlease select your new **Bhavana**:"
+                    self.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=msg_text,
+                        reply_markup=self._build_bhavana_keyboard(page=0, show_cancel=True, cancel_callback="SETTINGS_BACK"),
+                        parse_mode="Markdown"
+                    )
+                    return
+
+                # ── Settings: Edit Department ─────────────────────────────────
+                if data == "SETTING_DEPT":
+                    chat_id = call.message.chat.id
+                    sub = self._user_cache.get(chat_id) or self.storage.get_subscriber(chat_id) or {}
+                    bhav_name = sub.get('bhavana')
+                    
+                    if bhav_name and bhav_name in BHAVANAS_LIST:
+                        bhav_idx = BHAVANAS_LIST.index(bhav_name)
+                        self._setup_state[chat_id] = {
+                            'editing': 'department',
+                            'bhav_idx': bhav_idx,
+                            'initiator_id': call.from_user.id
+                        }
+                        msg_text = f"📚 **Edit Department**\n\nBhavana: **{bhav_name}**\n\nPlease select your **Department/Centre**:"
+                        self.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=call.message.message_id,
+                            text=msg_text,
+                            reply_markup=self._build_dept_keyboard(
+                                bhav_idx, 
+                                page=0, 
+                                show_cancel=True, 
+                                cancel_callback="SETTINGS_BACK", 
+                                back_callback=None
+                            ),
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        # Fallback to bhavana selection if current bhavana is invalid
+                        self._setup_state[chat_id] = {
+                            'editing': 'bhavana',
+                            'initiator_id': call.from_user.id
+                        }
+                        self.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=call.message.message_id,
+                            text="Please select your **Bhavana**:",
+                            reply_markup=self._build_bhavana_keyboard(page=0, show_cancel=True, cancel_callback="SETTINGS_BACK"),
+                            parse_mode="Markdown"
+                        )
                     return
 
                 # ── Settings: Delete Account (confirm prompt) ─────────────────
@@ -431,6 +616,9 @@ class BotHandlers:
                 # ── Settings: Back to settings menu ───────────────────────────
                 if data == "SETTINGS_BACK":
                     chat_id = call.message.chat.id
+                    self._setup_state.pop(chat_id, None)
+                    self.bot.clear_step_handler_by_chat_id(chat_id)
+                    
                     if chat_id in self._user_cache:
                         sub = self._user_cache[chat_id]
                     else:
@@ -438,12 +626,11 @@ class BotHandlers:
                         if sub:
                             self._user_cache[chat_id] = sub
                             
-                    name_str = f" for **{sub['name']}**" if sub and sub.get('name') else ""
                     self.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=call.message.message_id,
-                        text=f"🔧 **Settings**{name_str}\n\nWhat would you like to do?",
-                        reply_markup=self._build_settings_keyboard(),
+                        text=self._build_settings_text(sub),
+                        reply_markup=self._build_settings_keyboard(sub),
                         parse_mode="Markdown"
                     )
                     return
@@ -461,13 +648,15 @@ class BotHandlers:
                         logger.warning(f"Out-of-bounds page {page} in PB from user {call.message.chat.id}")
                         return
                     chat_id = call.message.chat.id
+                    is_editing = bool(self._setup_state.get(chat_id, {}).get('editing'))
                     is_existing = self._user_is_existing.get(chat_id, False)
-                    msg_text = f"Please select your **Institute (Bhavana)**:"
+                    cancel_cb = "SETTINGS_BACK" if is_editing else "CANCEL"
+                    msg_text = "Please select your **Bhavana**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_bhavana_keyboard(page=page, show_cancel=is_existing),
+                        reply_markup=self._build_bhavana_keyboard(page=page, show_cancel=is_existing or is_editing, cancel_callback=cancel_cb),
                         parse_mode="Markdown"
                     )
 
@@ -482,13 +671,23 @@ class BotHandlers:
                         return
                     bhav_name = BHAVANAS_LIST[bhav_idx]
                     chat_id = call.message.chat.id
+                    is_editing = bool(self._setup_state.get(chat_id, {}).get('editing'))
                     is_existing = self._user_is_existing.get(chat_id, False)
-                    msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
+                    
+                    cancel_cb = "SETTINGS_BACK" if is_editing else "CANCEL"
+                    back_cb = "SETTING_BHAVANA" if is_editing else "START"
+                    msg_text = f"Bhavana: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_dept_keyboard(bhav_idx, page=0, show_cancel=is_existing),
+                        reply_markup=self._build_dept_keyboard(
+                            bhav_idx, 
+                            page=0, 
+                            show_cancel=is_existing or is_editing, 
+                            cancel_callback=cancel_cb, 
+                            back_callback=back_cb
+                        ),
                         parse_mode="Markdown"
                     )
 
@@ -508,13 +707,22 @@ class BotHandlers:
                         logger.warning(f"Out-of-bounds page {page} in PD from user {call.message.chat.id}")
                         return
                     chat_id = call.message.chat.id
+                    is_editing = bool(self._setup_state.get(chat_id, {}).get('editing'))
                     is_existing = self._user_is_existing.get(chat_id, False)
-                    msg_text = f"Institute: {bhav_name}\n\nPlease select your **Department/Centre**:"
+                    cancel_cb = "SETTINGS_BACK" if is_editing else "CANCEL"
+                    back_cb = "SETTING_BHAVANA" if is_editing else "START"
+                    msg_text = f"Bhavana: {bhav_name}\n\nPlease select your **Department/Centre**:"
                     self.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=call.message.message_id,
                         text=msg_text,
-                        reply_markup=self._build_dept_keyboard(bhav_idx, page=page, show_cancel=is_existing),
+                        reply_markup=self._build_dept_keyboard(
+                            bhav_idx, 
+                            page=page, 
+                            show_cancel=is_existing or is_editing, 
+                            cancel_callback=cancel_cb, 
+                            back_callback=back_cb
+                        ),
                         parse_mode="Markdown"
                     )
 
@@ -543,9 +751,46 @@ class BotHandlers:
                     
                     chat_id = call.message.chat.id
                     state = self._setup_state.get(chat_id, {})
-                    existing_name = state.get('name')
+                    editing_mode = state.get('editing')
 
-                    # Finalize selection for Bhavana and Dept in memory
+                    if editing_mode in ('bhavana', 'department'):
+                        # Updating existing preferences directly from Settings
+                        updates = {'department': dept_name}
+                        if editing_mode == 'bhavana':
+                            updates['bhavana'] = bhav_name
+                        
+                        success = self.storage.update_subscriber(chat_id, updates)
+                        self._setup_state.pop(chat_id, None)
+                        
+                        if not success:
+                            self.bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=call.message.message_id,
+                                text="❌ Oops! We had a problem saving your selection. Please try /settings again. 🙏",
+                                parse_mode="Markdown"
+                            )
+                            return
+
+                        sub = self._user_cache.get(chat_id) or self.storage.get_subscriber(chat_id) or {}
+                        sub.update(updates)
+                        self._user_cache[chat_id] = sub
+                        self._user_is_existing[chat_id] = True
+
+                        msg_text = (
+                            f"✅ **Preferences Updated!**\n\n"
+                            + self._build_settings_text(sub)
+                        )
+                        self.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=call.message.message_id,
+                            text=msg_text,
+                            reply_markup=self._build_settings_keyboard(sub),
+                            parse_mode="Markdown"
+                        )
+                        return
+
+                    # Normal onboarding flow (/start)
+                    existing_name = state.get('name')
                     self._setup_state[chat_id] = {
                         'bhavana': bhav_name,
                         'department': dept_name,
@@ -556,7 +801,7 @@ class BotHandlers:
                         self.bot.edit_message_text(
                             chat_id=chat_id,
                             message_id=call.message.message_id,
-                            text=f"Institute: {bhav_name}\nDepartment: {dept_name}",
+                            text=f"Bhavana: {bhav_name}\nDepartment: {dept_name}",
                             parse_mode="Markdown"
                         )
                         msg = self.bot.send_message(
@@ -567,12 +812,12 @@ class BotHandlers:
                         )
                         self.bot.register_next_step_handler(msg, self._save_name_final_handler)
                     else:
-                        # Existing user updating settings -> save to DB now
                         success = self.storage.upsert_subscriber(
                             chat_id=chat_id,
                             bhavana=bhav_name,
                             department=dept_name,
-                            name=existing_name
+                            name=existing_name,
+                            receive_general_notices=True
                         )
                         if not success:
                             self.bot.edit_message_text(
@@ -585,19 +830,23 @@ class BotHandlers:
                             
                         self._user_is_existing[chat_id] = True
                         self._setup_state.pop(chat_id, None)
-                        self._user_cache[chat_id] = {
+                        sub = {
                             'telegram_chat_id': chat_id,
                             'bhavana': bhav_name,
                             'department': dept_name,
-                            'name': existing_name
+                            'name': existing_name,
+                            'receive_general_notices': True
                         }
+                        self._user_cache[chat_id] = sub
                         
+                        safe_name = _escape_markdown(existing_name)
                         msg_text = (
                             f"✅ **Subscription Updated!**\n\n"
-                            f"**{existing_name}**, you will now receive targeted notices for:\n"
+                            f"**{safe_name}**, you will now receive targeted notices for:\n"
                             f"🏛️ Bhavana: {bhav_name}\n"
-                            f"📚 Department: {dept_name}\n\n"
-                            f"_(Use /settings to change this at any time)_"
+                            f"📚 Department: {dept_name}\n"
+                            f"📢 General Notices: ✅ Enabled\n\n"
+                            f"_(Use /settings to change preferences at any time)_"
                         )
                         self.bot.edit_message_text(
                             chat_id=chat_id,

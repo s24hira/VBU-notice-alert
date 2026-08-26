@@ -95,12 +95,25 @@ SAMARTH_RESULTS_URL=https://visvabharati.samarth.edu.in/index.php/notifications/
 
 Interact with the bot on Telegram using:
 
-- `/start` - Setup notice alerts via the UI configuration (Institute -> Department -> Name).
-- `/settings` - Manage your subscription:
-  - **🔄 Reset Subscription** — Re-run the full setup flow (Institute → Department → Name) without clearing existing DB data.
+- `/start` - Setup notice alerts via the interactive configuration (Bhavana → Department → Name).
+- `/settings` - Interactive settings menu with direct editing buttons:
+  - **👤 Name** — Tap to edit your registered name.
+  - **🏛️ Bhavana** — Tap to change your Institute (Bhavana) and Department.
+  - **📚 Department** — Tap to change your department within your current Bhavana.
+  - **📢 General Notices** — Tap to toggle general university-wide notices on or off (`✅ ON` / `❌ OFF`).
   - **🗑️ Delete Account** — Permanently erase all your subscription data with a confirmation step.
 - `/status` - Check current bot status.
 - `/ping` - Confirm bot is online (responds with `Pong!`).
+
+---
+
+## 🗄️ Database Setup
+
+Ensure the `subscribers` table in Supabase has the following schema:
+
+```sql
+ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS receive_general_notices BOOLEAN DEFAULT TRUE;
+```
 
 ---
 

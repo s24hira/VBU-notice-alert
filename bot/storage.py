@@ -48,28 +48,51 @@ class SupabaseStorage:
             logger.error(f"Error adding user {chat_id} to Supabase: {type(e).__name__}")
             return False
 
-    def upsert_subscriber(self, chat_id, bhavana, department, name=None):
+    ALLOWED_SUBSCRIBER_FIELDS = {'name', 'bhavana', 'department', 'receive_general_notices'}
+
+    def upsert_subscriber(self, chat_id, bhavana, department, name=None, receive_general_notices=True):
         try:
             payload = {
                 'telegram_chat_id': chat_id,
                 'bhavana': bhavana,
-                'department': department
+                'department': department,
+                'receive_general_notices': receive_general_notices
             }
             if name:
                 payload['name'] = name
                 
             self.supabase.table('subscribers').upsert(payload).execute()
-            logger.info(f"Subscriber {chat_id} upserted with selections: {bhavana}, {department}, name: {name}.")
+            logger.info(f"Subscriber {chat_id} upserted with selections: {bhavana}, {department}, name: {name}, receive_general_notices: {receive_general_notices}.")
             return True
         except Exception as e:
             logger.error(f"Error upserting subscriber {chat_id}: {type(e).__name__}")
+            return False
+
+    def update_subscriber(self, chat_id, updates: dict):
+        """Update specific fields for an existing subscriber with strict field whitelisting."""
+        try:
+            # Whitelist allowed fields for security
+            sanitized_payload = {k: v for k, v in updates.items() if k in self.ALLOWED_SUBSCRIBER_FIELDS}
+            if not sanitized_payload:
+                logger.warning(f"No valid fields to update for subscriber {chat_id}.")
+                return False
+
+            self.supabase.table('subscribers').update(sanitized_payload).eq('telegram_chat_id', chat_id).execute()
+            logger.info(f"Subscriber {chat_id} updated with fields: {list(sanitized_payload.keys())}.")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating subscriber {chat_id}: {type(e).__name__}")
             return False
 
     def get_subscriber(self, chat_id):
         try:
             response = self.supabase.table('subscribers').select('*').eq('telegram_chat_id', chat_id).execute()
             if response.data:
-                return response.data[0]
+                subscriber = response.data[0]
+                # Default receive_general_notices to True if missing/None for backward compatibility
+                if subscriber.get('receive_general_notices') is None:
+                    subscriber['receive_general_notices'] = True
+                return subscriber
             return None
         except Exception as e:
             logger.error(f"Error fetching subscriber {chat_id}: {type(e).__name__}")
@@ -97,7 +120,9 @@ class SupabaseStorage:
         # notice_data should contain target_bhavana, target_department, is_general
         try:
             if notice_data.get('is_general', False):
-                return self.get_all_users()
+                # Only return users who want general notices (receive_general_notices is not False)
+                response = self.supabase.table('subscribers').select('telegram_chat_id').neq('receive_general_notices', False).execute()
+                return [user['telegram_chat_id'] for user in response.data]
 
             target_bhavana = notice_data.get('target_bhavana') or "Central Administration / Office"
             target_department = notice_data.get('target_department')
