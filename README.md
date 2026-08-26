@@ -1,6 +1,6 @@
 # Visva-Bharati Notice Alert Bot 🚀
 
-A modern, lightweight Telegram bot designed to monitor the official Visva-Bharati University website for new notices, extract and summarize PDF contents using Google's **Gemini 3.6 Flash** and **Gemini 3.1 Flash Lite** models, and send instant alerts to subscribed users. It specifically tracks the 10 most recent notices.
+A modern, lightweight Telegram bot designed to monitor the official Visva-Bharati University website for new notices, extract and summarize PDF contents using Google's **Gemini 3.7 Flash** and failover models, and send instant alerts to subscribed users. It specifically tracks the 10 most recent notices.
 
 ---
 
@@ -8,7 +8,7 @@ A modern, lightweight Telegram bot designed to monitor the official Visva-Bharat
 
 - **Automated Monitoring:** Continuously scans the Visva-Bharati website for new notices and the Samarth portal for examination results at randomized, natural intervals (10–20 minutes).
 - **Direct PDF Summarization:** Uses Google's **Gemini REST API** (directly over HTTP to minimize RAM overhead) to summarize PDFs inline and extract target audience parameters.
-- **Model Rotation & Failover:** Rotates dynamically across `gemini-3.6-flash` (priority 1), `gemini-3.1-flash-lite`, `gemini-3.5-flash`, and `gemini-3-flash-preview` to balance API quota. Ensures distinct models are used for consecutive notice processing in a single run. If a model encounters a rate limit (429), the bot automatically switches to the alternative model and retries instantly.
+- **Model Rotation & Failover:** Rotates dynamically across `gemini-3.7-flash` (priority 1), `gemini-3.6-flash`, `gemini-3.1-flash-lite`, `gemini-3.5-flash`, and `gemini-3-flash-preview` to balance API quota. Ensures distinct models are used for consecutive notice processing in a single run. If a model encounters a rate limit (429), the bot automatically switches to the alternative model and retries instantly.
 - **Fallback Title Categorization:** If a notice PDF or image is unavailable or fails to download, the bot falls back to categorizing and extracting target parameters based purely on the text of the notice title.
 - **Strict Notice Processing:** Mandates successful summary extraction. If summarization fails or returns empty, the notice is skipped and intelligently deferred for retry.
 - **Intelligent Retry Logic:** Integrates an exponential backoff mechanism for the Gemini API to gracefully handle sudden rate-limiting or 503 unavailability errors.

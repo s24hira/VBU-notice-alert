@@ -233,22 +233,23 @@ class GeminiPDFSummarizer:
         Initialize Gemini PDF Summarizer
         """
         self.api_key = api_key
-        self.models = models or ['gemini-3.6-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-3-flash-preview']
+        self.models = models or [
+            'gemini-3.7-flash',
+            'gemini-3.6-flash',
+            'gemini-3.1-flash-lite',
+            'gemini-3.5-flash',
+            'gemini-3-flash-preview'
+        ]
         self.current_model_index = 0
         self._model_lock = threading.Lock()
         self._headers = {
             "Content-Type": "application/json",
             "x-goog-api-key": self.api_key
         }
+        self._init_schema()
 
-    def reset_model_index(self):
-        """
-        Reset model rotation index to 0 so the highest priority model (gemini-3.6-flash) is used first.
-        """
-        with self._model_lock:
-            self.current_model_index = 0
-
-        # Pre-compute Gemini schema
+    def _init_schema(self):
+        """Pre-compute Gemini JSON response schema from Pydantic model."""
         schema = NoticeExtraction.model_json_schema()
         self._gemini_schema = {
             "type": "OBJECT",
@@ -276,6 +277,13 @@ class GeminiPDFSummarizer:
                 prop_schema["enum"] = prop_details["enum"]
                 
             self._gemini_schema["properties"][prop_name] = prop_schema
+
+    def reset_model_index(self):
+        """
+        Reset model rotation index to 0 so the highest priority model (gemini-3.7-flash) is used first.
+        """
+        with self._model_lock:
+            self.current_model_index = 0
 
     def _get_next_url(self):
         with self._model_lock:
