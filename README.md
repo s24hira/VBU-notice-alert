@@ -123,12 +123,16 @@ ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS receive_general_notices BOOLEAN
 ├── bot/
 │   ├── utils/
 │   │   ├── summarizer.py     # Gemini structured extraction and summary logic
-│   │   └── http_client.py    # Multi-strategy resilient HTTP client (anti-bot bypass)
+│   │   ├── http_client.py    # Multi-strategy resilient HTTP client (anti-bot bypass)
+│   │   └── validators.py     # Centralized input validation and sanitization
 │   ├── constants.py          # Categorization constants (Bhavanas, Depts)
 │   ├── handlers.py           # Telegram command and inline callback handlers
 │   ├── notice_processor.py   # Scraper, target-filtering, and alert coordinator for notices
 │   ├── result_processor.py   # Scraper, target-filtering, and alert coordinator for exam results
 │   └── storage.py            # Supabase PostgreSQL database integration
+├── tests/                    # Automated pytest test suites
+│   ├── test_handlers_flow.py # End-to-end user onboarding and callback tests
+│   └── test_settings.py      # Settings interface and input validation tests
 ├── data/                     # Local data cache
 ├── main.py                   # Main bot execution entrypoint
 ├── test_alert.py             # E2E test verification script
